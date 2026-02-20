@@ -1,8 +1,8 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { CM360_SIZES, PLACEMENT_STRATEGIES } from '../constants';
-import { X, Plus, Layers, Check, Info, Calendar, Globe, Settings2 } from 'lucide-react';
+import { CM360_SIZES, PLACEMENT_STRATEGIES, NAMING_TAXONOMY } from '../constants';
+import { X, Plus, Layers, Check, Info, Calendar, Globe, Settings2, Tag } from 'lucide-react';
 import { Placement } from '../types';
 
 interface PlacementCreatorProps {
@@ -12,13 +12,29 @@ interface PlacementCreatorProps {
 const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
   const { selectedCampaign, sites, addPlacements } = useApp();
   
-  const [namePrefix, setNamePrefix] = useState('ES_PROMO');
+  // Naming Parts
+  const [naming, setNaming] = useState({
+    brand: 'ae',
+    iso: NAMING_TAXONOMY.ISO[0],
+    site: NAMING_TAXONOMY.Sites[0],
+    campaña: NAMING_TAXONOMY.Campañas[0],
+    canal: NAMING_TAXONOMY.Canales[0],
+    funnel: NAMING_TAXONOMY.Funnel[0],
+    tech: NAMING_TAXONOMY.Tech[0],
+    device: NAMING_TAXONOMY.Device[0],
+    format: NAMING_TAXONOMY.Formats[0]
+  });
+
   const [selectedSiteId, setSelectedSiteId] = useState(sites[0]?.id || '');
   const [type, setType] = useState<'Display' | 'Video' | 'Native'>('Display');
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
-  const [strategy, setStrategy] = useState(PLACEMENT_STRATEGIES[0]);
   const [startDate, setStartDate] = useState(selectedCampaign?.startDate || '');
   const [endDate, setEndDate] = useState(selectedCampaign?.endDate || '');
+
+  const namePrefix = useMemo(() => {
+    const { brand, iso, site, campaña, canal, funnel, tech, device, format } = naming;
+    return `${brand}-${iso}_${site}_${campaña}_${canal}_${funnel}_${tech}_${device}_${format}`;
+  }, [naming]);
 
   const toggleSize = (size: string) => {
     setSelectedSizes(prev => 
@@ -32,7 +48,7 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
     const newPlacements: Placement[] = selectedSizes.map(size => ({
       id: `plc-${Math.random().toString(36).substr(2, 9)}`,
       campaignId: selectedCampaign.id,
-      name: `${namePrefix}_${size}_${strategy}`,
+      name: `${namePrefix}_${size}_`,
       siteId: selectedSiteId,
       size: size,
       type: type,
@@ -47,19 +63,23 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
     onClose();
   };
 
+  const updateNaming = (key: keyof typeof naming, value: string) => {
+    setNaming(prev => ({ ...prev, [key]: value }));
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-      <div className="bg-slate-900 w-full max-w-4xl rounded-3xl border border-slate-800 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div className="bg-slate-900 w-full max-w-6xl rounded-3xl border border-slate-800 shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header */}
         <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600/20 rounded-xl flex items-center justify-center">
-              <Plus className="w-6 h-6 text-blue-500" />
+            <div className="w-10 h-10 bg-emerald-600/20 rounded-xl flex items-center justify-center">
+              <Plus className="w-6 h-6 text-emerald-500" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white">Advanced Placement Creator</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Configure and generate multiple placements at once</p>
+              <h2 className="text-xl font-bold text-white">Taxonomy Placement Builder</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Build standardized CM360 names using official AdOps taxonomy</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors">
@@ -67,87 +87,155 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Left Column: Config */}
-          <div className="space-y-6">
+        <div className="flex-1 overflow-y-auto p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+          
+          {/* Column 1: Taxonomy Selectors */}
+          <div className="lg:col-span-2 space-y-6">
             <section className="space-y-4">
               <h3 className="text-[10px] uppercase font-bold tracking-widest text-slate-500 flex items-center gap-2">
-                <Globe className="w-3 h-3" /> General Configuration
+                <Tag className="w-3 h-3" /> Naming Taxonomy
               </h3>
               
-              <div className="space-y-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-slate-950/50 p-6 rounded-2xl border border-slate-800">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1.5 ml-1">Naming Prefix</label>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Brand</label>
                   <input 
                     type="text"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-blue-400 focus:outline-none focus:border-blue-500 transition-all font-mono"
-                    value={namePrefix}
-                    onChange={(e) => setNamePrefix(e.target.value)}
-                    placeholder="e.g. ES_BRAND_Q4"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-blue-400 focus:outline-none focus:border-blue-500 transition-all font-mono"
+                    value={naming.brand}
+                    onChange={(e) => updateNaming('brand', e.target.value)}
                   />
                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1.5 ml-1">Site</label>
-                    <select 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
-                      value={selectedSiteId}
-                      onChange={(e) => setSelectedSiteId(e.target.value)}
-                    >
-                      {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1.5 ml-1">Strategy</label>
-                    <select 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
-                      value={strategy}
-                      onChange={(e) => setStrategy(e.target.value)}
-                    >
-                      {PLACEMENT_STRATEGIES.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">ISO (País)</label>
+                  <select 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+                    value={naming.iso}
+                    onChange={(e) => updateNaming('iso', e.target.value)}
+                  >
+                    {NAMING_TAXONOMY.ISO.map(v => <option key={v} value={v}>{v.toUpperCase()}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Site</label>
+                  <select 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+                    value={naming.site}
+                    onChange={(e) => updateNaming('site', e.target.value)}
+                  >
+                    {NAMING_TAXONOMY.Sites.map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Campaña</label>
+                  <select 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+                    value={naming.campaña}
+                    onChange={(e) => updateNaming('campaña', e.target.value)}
+                  >
+                    {NAMING_TAXONOMY.Campañas.map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Canal</label>
+                  <select 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+                    value={naming.canal}
+                    onChange={(e) => updateNaming('canal', e.target.value)}
+                  >
+                    {NAMING_TAXONOMY.Canales.map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Funnel</label>
+                  <select 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+                    value={naming.funnel}
+                    onChange={(e) => updateNaming('funnel', e.target.value)}
+                  >
+                    {NAMING_TAXONOMY.Funnel.map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Tech</label>
+                  <select 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+                    value={naming.tech}
+                    onChange={(e) => updateNaming('tech', e.target.value)}
+                  >
+                    {NAMING_TAXONOMY.Tech.map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Device</label>
+                  <select 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+                    value={naming.device}
+                    onChange={(e) => updateNaming('device', e.target.value)}
+                  >
+                    {NAMING_TAXONOMY.Device.map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Format</label>
+                  <select 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+                    value={naming.format}
+                    onChange={(e) => updateNaming('format', e.target.value)}
+                  >
+                    {NAMING_TAXONOMY.Formats.map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
                 </div>
               </div>
             </section>
 
-            <section className="space-y-4">
-              <h3 className="text-[10px] uppercase font-bold tracking-widest text-slate-500 flex items-center gap-2">
-                <Calendar className="w-3 h-3" /> Flight Dates
-              </h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1.5 ml-1">Start Date</label>
+            <div className="grid grid-cols-2 gap-8">
+              <section className="space-y-4">
+                <h3 className="text-[10px] uppercase font-bold tracking-widest text-slate-500 flex items-center gap-2">
+                  <Globe className="w-3 h-3" /> CM360 Site Mapping
+                </h3>
+                <select 
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+                  value={selectedSiteId}
+                  onChange={(e) => setSelectedSiteId(e.target.value)}
+                >
+                  {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </section>
+
+              <section className="space-y-4">
+                <h3 className="text-[10px] uppercase font-bold tracking-widest text-slate-500 flex items-center gap-2">
+                  <Calendar className="w-3 h-3" /> Flight Dates
+                </h3>
+                <div className="grid grid-cols-2 gap-3">
                   <input 
                     type="date"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
                   />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1.5 ml-1">End Date</label>
                   <input 
                     type="date"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
                   />
                 </div>
-              </div>
-            </section>
+              </section>
+            </div>
 
-            <div className="p-4 bg-blue-600/5 border border-blue-500/10 rounded-2xl flex gap-3">
-              <Info className="w-5 h-5 text-blue-400 shrink-0" />
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                Placements will be created as <span className="text-blue-400 font-bold italic">Draft</span> status. 
-                You can push them to CM360 after reviewing the naming convention.
-              </p>
+            <div className="p-4 bg-blue-600/5 border border-blue-500/10 rounded-2xl">
+               <div className="flex items-center gap-3 mb-2">
+                  <Info className="w-4 h-4 text-blue-400" />
+                  <span className="text-[10px] uppercase font-bold text-blue-400 tracking-widest">Naming Preview</span>
+               </div>
+               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-xs text-blue-300 break-all leading-relaxed">
+                  {namePrefix}_<span className="text-slate-500">[SIZE]</span>_
+               </div>
             </div>
           </div>
 
-          {/* Right Column: Format & Sizes */}
+          {/* Column 2: Format & Sizes */}
           <div className="space-y-6">
             <section className="space-y-4">
               <h3 className="text-[10px] uppercase font-bold tracking-widest text-slate-500 flex items-center gap-2">
@@ -168,7 +256,7 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
                 ))}
               </div>
 
-              <div className="grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+              <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                 {CM360_SIZES[type].map(size => (
                   <button
                     key={size}
@@ -188,20 +276,20 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
 
             <section className="pt-4 border-t border-slate-800">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-[10px] uppercase font-bold tracking-widest text-slate-500">Preview Generation</h3>
-                <span className="text-[10px] font-bold text-blue-500 bg-blue-500/10 px-2 py-0.5 rounded-full">
+                <h3 className="text-[10px] uppercase font-bold tracking-widest text-slate-500">Batch Summary</h3>
+                <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full">
                   {selectedSizes.length} Placements
                 </span>
               </div>
               
-              <div className="space-y-2 max-h-[120px] overflow-y-auto pr-2 custom-scrollbar">
+              <div className="space-y-2 max-h-[150px] overflow-y-auto pr-2 custom-scrollbar">
                 {selectedSizes.length === 0 ? (
-                  <p className="text-[10px] text-slate-600 italic text-center py-4">Select at least one size to see preview...</p>
+                  <p className="text-[10px] text-slate-600 italic text-center py-4">Select dimensions to generate names...</p>
                 ) : (
                   selectedSizes.map(size => (
-                    <div key={size} className="flex items-center gap-2 text-[10px] font-mono text-slate-500">
-                      <Layers className="w-3 h-3" />
-                      <span className="truncate">{namePrefix}_{size}_{strategy}</span>
+                    <div key={size} className="flex items-center gap-2 text-[9px] font-mono text-slate-500 bg-slate-950/50 p-2 rounded-lg border border-slate-800/50">
+                      <Layers className="w-3 h-3 shrink-0" />
+                      <span className="truncate">{namePrefix}_{size}_</span>
                     </div>
                   ))
                 )}
@@ -212,19 +300,27 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
 
         {/* Footer */}
         <div className="p-6 border-t border-slate-800 bg-slate-900/50 flex justify-between items-center">
-          <button 
-            onClick={onClose}
-            className="px-6 py-2.5 rounded-xl text-slate-400 hover:text-white transition-all font-bold text-sm"
-          >
-            Cancel
-          </button>
-          <button 
-            onClick={handleCreate}
-            disabled={selectedSizes.length === 0}
-            className="flex items-center gap-2 px-8 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-sm transition-all shadow-lg shadow-blue-600/20 disabled:opacity-50 disabled:grayscale"
-          >
-            Create {selectedSizes.length} Placements
-          </button>
+          <div className="flex items-center gap-4">
+            <div className="flex flex-col">
+              <span className="text-[10px] text-slate-500 uppercase font-bold tracking-tighter">Target Campaign</span>
+              <span className="text-xs text-blue-400 font-bold truncate max-w-[200px]">{selectedCampaign?.name}</span>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <button 
+              onClick={onClose}
+              className="px-6 py-2.5 rounded-xl text-slate-400 hover:text-white transition-all font-bold text-sm"
+            >
+              Cancel
+            </button>
+            <button 
+              onClick={handleCreate}
+              disabled={selectedSizes.length === 0}
+              className="flex items-center gap-2 px-8 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-sm transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50 disabled:grayscale"
+            >
+              Generate {selectedSizes.length} Placements
+            </button>
+          </div>
         </div>
       </div>
     </div>

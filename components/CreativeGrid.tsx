@@ -19,11 +19,27 @@ import {
 } from 'lucide-react';
 
 const CreativeGrid: React.FC = () => {
-  const { creatives, selectedAdvertiser, fetchCreatives, connectionStatus } = useApp();
+  const { creatives, selectedAdvertiser, fetchCreatives, connectionStatus, uploadCreative } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [loading, setLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedAdvertiser) return;
+
+    setIsUploading(true);
+    const success = await uploadCreative(file, file.name.split('.')[0], 'Display');
+    setIsUploading(false);
+    
+    if (success) {
+      alert('Creative uploaded successfully!');
+    } else {
+      alert('Failed to upload creative.');
+    }
+  };
 
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -88,6 +104,23 @@ const CreativeGrid: React.FC = () => {
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Sync Assets
           </button>
+
+          <div className="relative">
+            <input 
+              type="file" 
+              id="creative-upload" 
+              className="hidden" 
+              onChange={handleFileUpload}
+              accept="image/*,video/*"
+            />
+            <label 
+              htmlFor="creative-upload"
+              className={`flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-blue-500/20 cursor-pointer ${isUploading ? 'opacity-50 pointer-events-none' : ''}`}
+            >
+              {isUploading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+              Upload Creative
+            </label>
+          </div>
         </div>
       </div>
 

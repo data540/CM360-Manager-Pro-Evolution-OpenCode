@@ -41,6 +41,9 @@ interface AppContextType {
   fetchAdvertisers: () => Promise<void>;
   fetchCampaigns: (advertiserId: string) => Promise<void>;
   fetchCreatives: () => Promise<void>;
+  createCampaign: (campaign: Partial<Campaign>) => Promise<boolean>;
+  pushPlacements: (placementIds: string[]) => Promise<{success: number, failed: number}>;
+  uploadCreative: (file: File, name: string, type: string) => Promise<boolean>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -310,6 +313,128 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const createCampaign = async (campaignData: Partial<Campaign>) => {
+    if (!accessToken || !profileId || !selectedAdvertiser) return false;
+    try {
+      const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/campaigns`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          advertiserId: selectedAdvertiser.id,
+          name: campaignData.name,
+          startDate: campaignData.startDate,
+          endDate: campaignData.endDate,
+          defaultLandingPageName: 'Default Landing Page',
+          defaultLandingPageUrl: 'https://www.aireuropa.com'
+        })
+      });
+      if (res.ok) {
+        await fetchCampaignsInternal(accessToken, profileId, selectedAdvertiser.id);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error("Create campaign error:", e);
+      return false;
+    }
+  };
+
+  const pushPlacements = async (placementIds: string[]) => {
+    if (!accessToken || !profileId) return { success: 0, failed: placementIds.length };
+    let successCount = 0;
+    let failedCount = 0;
+
+    const placementsToPush = placements.filter(p => placementIds.includes(p.id));
+
+    for (const p of placementsToPush) {
+      try {
+        const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/placements`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            campaignId: p.campaignId,
+            name: p.name,
+            siteId: p.siteId,
+            size: {
+              width: p.size.split('x')[0],
+              height: p.size.split('x')[1]
+            },
+            paymentSource: 'PLACEMENT_AGENCY_PAID',
+            pricingSchedule: {
+              pricingType: 'PRICING_TYPE_CPM',
+              startDate: p.startDate,
+              endDate: p.endDate
+            }
+          })
+        });
+        if (res.ok) {
+          successCount++;
+          // Update local status
+          setPlacements(prev => prev.map(item => item.id === p.id ? { ...item, status: 'Active' } : item));
+        } else {
+          failedCount++;
+        }
+      } catch (e) {
+        failedCount++;
+      }
+    }
+    return { success: successCount, failed: failedCount };
+  };
+
+  const uploadCreative = async (file: File, name: string, type: string) => {
+    if (!accessToken || !profileId || !selectedAdvertiser) return false;
+    try {
+      // 1. Insert Creative Asset
+      const metadata = { fileName: file.name, assetIdentifier: { type: 'HTML_ASSET', name: file.name } };
+      const formData = new FormData();
+      formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+      formData.append('file', file);
+
+      const assetRes = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creativeAssets/${selectedAdvertiser.id}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: formData
+      });
+
+      if (!assetRes.ok) return false;
+      const assetData = await assetRes.json();
+
+      // 2. Insert Creative
+      const creativeRes = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creatives`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          advertiserId: selectedAdvertiser.id,
+          name: name,
+          type: type === 'Video' ? 'INSTREAM_VIDEO' : 'DISPLAY',
+          size: { width: 300, height: 250 }, // Simplified
+          creativeAssets: [{
+            assetIdentifier: assetData.assetIdentifier,
+            role: 'PRIMARY'
+          }]
+        })
+      });
+
+      if (creativeRes.ok) {
+        await fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error("Upload creative error:", e);
+      return false;
+    }
+  };
+
   const loginWithToken = async (token: string) => {
     return await handleAuthSuccess(token);
   };
@@ -358,7 +483,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setSelectedAdvertiser, setSelectedCampaign, setCurrentView,
       addPlacements, updatePlacement, deletePlacement,
       connectionStatus, isAuthenticated, accessToken, profileId, accountId, user, login, loginWithToken, enterDemoMode, logout,
-      fetchAdvertisers, fetchCampaigns, fetchCreatives
+      fetchAdvertisers, fetchCampaigns, fetchCreatives, createCampaign, pushPlacements, uploadCreative
     }}>
       {children}
     </AppContext.Provider>

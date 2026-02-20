@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { ViewType } from '../types';
 import { 
@@ -11,7 +11,8 @@ import {
   ChevronDown,
   Circle,
   Database,
-  RefreshCw
+  RefreshCw,
+  Plus
 } from 'lucide-react';
 
 const Sidebar: React.FC = () => {
@@ -26,8 +27,31 @@ const Sidebar: React.FC = () => {
     selectedCampaign,
     setSelectedCampaign,
     fetchAdvertisers,
-    isAuthenticated
+    isAuthenticated,
+    fetchCampaigns,
+    createCampaign
   } = useApp();
+
+  const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
+  const [newCampaignName, setNewCampaignName] = useState('');
+  const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
+
+  const handleCreateCampaign = async () => {
+    if (!newCampaignName || !selectedAdvertiser) return;
+    setIsCreatingCampaign(true);
+    const success = await createCampaign({
+      name: newCampaignName,
+      startDate: new Date().toISOString().split('T')[0],
+      endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    });
+    setIsCreatingCampaign(false);
+    if (success) {
+      setIsCampaignModalOpen(false);
+      setNewCampaignName('');
+    } else {
+      alert('Failed to create campaign.');
+    }
+  };
 
   const navItems: { type: ViewType; icon: any; label: string }[] = [
     { type: 'Campaigns', icon: LayoutDashboard, label: 'Campaigns' },
@@ -84,15 +108,26 @@ const Sidebar: React.FC = () => {
         <div className="relative">
           <div className="flex justify-between items-center mb-1 px-2">
             <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Active Campaign</label>
-            {selectedAdvertiser && connectionStatus === 'Connected' && (
-              <button 
-                onClick={() => fetchCampaigns(selectedAdvertiser.id)}
-                className="text-[9px] text-blue-400 hover:text-blue-300 flex items-center gap-1"
-                title="Actualizar campañas"
-              >
-                <RefreshCw className="w-2.5 h-2.5" /> REFRESH
-              </button>
-            )}
+            <div className="flex gap-2">
+              {selectedAdvertiser && connectionStatus === 'Connected' && (
+                <>
+                  <button 
+                    onClick={() => setIsCampaignModalOpen(true)}
+                    className="text-[9px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                    title="Nueva campaña"
+                  >
+                    <Plus className="w-2.5 h-2.5" /> NEW
+                  </button>
+                  <button 
+                    onClick={() => fetchCampaigns(selectedAdvertiser.id)}
+                    className="text-[9px] text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                    title="Actualizar campañas"
+                  >
+                    <RefreshCw className="w-2.5 h-2.5" /> REFRESH
+                  </button>
+                </>
+              )}
+            </div>
           </div>
           <div className="relative">
             <select 
@@ -150,6 +185,45 @@ const Sidebar: React.FC = () => {
           </p>
         </div>
       </div>
+      {/* Campaign Creation Modal */}
+      {isCampaignModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-bold text-white mb-2">Create New Campaign</h3>
+            <p className="text-slate-400 text-sm mb-6">Enter a name for the new campaign in {selectedAdvertiser?.name}.</p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Campaign Name</label>
+                <input 
+                  type="text"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+                  placeholder="e.g. Q1_Brand_Awareness_2024"
+                  value={newCampaignName}
+                  onChange={(e) => setNewCampaignName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              
+              <div className="flex gap-3 pt-4">
+                <button 
+                  onClick={() => setIsCampaignModalOpen(false)}
+                  className="flex-1 py-3 text-slate-400 hover:text-white font-bold transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleCreateCampaign}
+                  disabled={!newCampaignName || isCreatingCampaign}
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20 disabled:opacity-50"
+                >
+                  {isCreatingCampaign ? <RefreshCw className="w-4 h-4 animate-spin mx-auto" /> : 'Create Campaign'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

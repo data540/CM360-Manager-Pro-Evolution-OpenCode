@@ -52,3 +52,14 @@ export const CM360_SIZES = {
 export const PLACEMENT_STRATEGIES = [
   'Standard', 'Premium', 'Direct', 'Programmatic', 'Social', 'Search'
 ];
+
+export const NAMING_TAXONOMY = {
+  ISO: ['ar', 'be', 'br', 'ch', 'cl', 'co', 'de', 'do', 'ec', 'es', 'fr', 'gb', 'it', 'mx', 'nl', 'pa', 'pe', 'pt', 'py', 'us', 'uy', 'bo'],
+  Campañas: ['ttf-ene', 'ttf-abr', 'ttf-sep', 'bf', 'ao', 'promperu', 'panama', 'business', 'turista', 'ref-latam', 'ref-francia', 'dreamliners', 'cyber-days', 'holiday', 'raices-latam', 'honduras', 'rep-dominicana', 'brand-awareness', 'ip-latam'],
+  Canales: ['dis', 'nat', 'vid', 'dooh', 'ctv', 'aud', 'netflix', 'disney', 'prime', 'email', 'youtube'],
+  Sites: ['kpi360', 'alkimiads', 'elpais', 'as', 'eldiario', 'okdiario', 'eleconomista', 'edatv', 'larazon', 'prensaiberica', 'eldebate', 'vidoomy', 'prisa', 'wemass', '20minutos', 'clarin', 'elcronista', 'forbes', 'tapas', 'veepee', 'mediaset', 'ctv-premium', 'sport', 'abc', 'elespañol', 'elmundo'],
+  Funnel: ['prs', 'rtg', 'bd-home', 'bd-anot', 'bw', 'ron', 'ros', 'deal'],
+  Device: ['desktop', 'mobile', 'all'],
+  Tech: ['dv360', 'dv360-prem', 'quantcast', 'taboola', 'outbrain', 'stackadapt', 'ttd', 'amazon', 'directo', 'microsoft', 'mediasmart', 'addor'],
+  Formats: ['gen', 'rich', 'dyn', 'vid']
+};

@@ -20,11 +20,21 @@ import {
 } from 'lucide-react';
 
 const PlacementGrid: React.FC = () => {
-  const { placements, selectedCampaign, deletePlacement } = useApp();
+  const { placements, selectedCampaign, deletePlacement, pushPlacements } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [isCreatorOpen, setIsCreatorOpen] = useState(false);
+  const [isPushing, setIsPushing] = useState(false);
+
+  const handlePushToCM360 = async () => {
+    if (selectedRows.size === 0) return;
+    setIsPushing(true);
+    const result = await pushPlacements(Array.from(selectedRows));
+    setIsPushing(false);
+    alert(`Push complete: ${result.success} succeeded, ${result.failed} failed.`);
+    setSelectedRows(new Set());
+  };
 
   const filteredPlacements = placements.filter(p => {
     const matchesCampaign = !selectedCampaign || p.campaignId === selectedCampaign.id;
@@ -99,6 +109,14 @@ const PlacementGrid: React.FC = () => {
           >
             <FileDown className="w-3.5 h-3.5" />
             Export CSV
+          </button>
+          <button 
+            onClick={handlePushToCM360}
+            disabled={selectedRows.size === 0 || isPushing}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:grayscale"
+          >
+            {isPushing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+            Push to CM360 ({selectedRows.size})
           </button>
           <button 
             onClick={() => setIsCreatorOpen(true)}
