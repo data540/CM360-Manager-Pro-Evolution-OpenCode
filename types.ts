@@ -47,6 +47,7 @@ export interface Creative {
   status: Status;
   thumbnailUrl: string;
   placementIds: string[];
+  externalUrl?: string;
 }
 
 export interface BatchItem {

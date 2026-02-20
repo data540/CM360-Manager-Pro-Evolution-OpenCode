@@ -32,6 +32,7 @@ interface AppContextType {
   isAuthenticated: boolean;
   accessToken: string | null;
   profileId: string | null;
+  accountId: string | null;
   user: UserProfile | null;
   login: (customClientId?: string) => void;
   loginWithToken: (token: string) => Promise<{success: boolean, error?: string}>;
@@ -39,6 +40,7 @@ interface AppContextType {
   logout: () => void;
   fetchAdvertisers: () => Promise<void>;
   fetchCampaigns: (advertiserId: string) => Promise<void>;
+  fetchCreatives: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -60,6 +62,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   
   const [accessToken, setAccessToken] = useState<string | null>(localStorage.getItem('cm360_token'));
   const [profileId, setProfileId] = useState<string | null>(localStorage.getItem('cm360_profile_id'));
+  const [accountId, setAccountId] = useState<string | null>(localStorage.getItem('cm360_account_id'));
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!localStorage.getItem('cm360_token'));
   const [user, setUser] = useState<UserProfile | null>(() => {
     const saved = localStorage.getItem('cm360_user');
@@ -155,6 +158,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (profilesData.items && profilesData.items.length > 0) {
         console.log("✅ Perfil encontrado:", profilesData.items[0].profileId);
         const pid = profilesData.items[0].profileId;
+        const accId = profilesData.items[0].accountId;
         const userProfile = { 
           name: userData.name || "User", 
           email: userData.email || "No email", 
@@ -163,12 +167,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         
         setAccessToken(token);
         setProfileId(pid);
+        setAccountId(accId);
         setUser(userProfile);
         setIsAuthenticated(true);
         setConnectionStatus('Connected');
         
         localStorage.setItem('cm360_token', token);
         localStorage.setItem('cm360_profile_id', pid);
+        localStorage.setItem('cm360_account_id', accId);
         localStorage.setItem('cm360_user', JSON.stringify(userProfile));
         
         fetchAdvertisersInternal(token, pid);
@@ -242,6 +248,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
     if (isAuthenticated && accessToken && profileId && selectedAdvertiser) {
       fetchCampaignsInternal(accessToken, profileId, selectedAdvertiser.id);
+      fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
     }
   }, [selectedAdvertiser, isAuthenticated, accessToken, profileId]);
 
@@ -251,6 +258,56 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const fetchCampaigns = async (advertiserId: string) => {
     if (accessToken && profileId) await fetchCampaignsInternal(accessToken, profileId, advertiserId);
+  };
+
+  const fetchCreativesInternal = async (token: string, pid: string, advertiserId: string) => {
+    try {
+      console.log(`📡 Cargando creatividades para el anunciante ${advertiserId}...`);
+      const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${pid}/creatives?advertiserId=${advertiserId}&maxResults=100&archived=false`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.creatives) {
+        const mappedCreatives: Creative[] = data.creatives.map((c: any) => {
+          const sizeStr = c.size ? `${c.size.width}x${c.size.height}` : '300x250';
+          const [width, height] = sizeStr.includes('x') ? sizeStr.split('x').map(Number) : [300, 250];
+          
+          const simulatedThumb = `https://picsum.photos/seed/${c.id}/${width || 300}/${height || 250}`;
+
+          // Construcción de la URL basada en la estructura real de CM360 observada en la imagen
+          // Si hay una campaña seleccionada, usamos el explorer de la campaña. 
+          // Si no, usamos la vista de anunciante.
+          const baseUrl = `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}`;
+          const creativePath = selectedCampaign 
+            ? `/campaigns/${selectedCampaign.id}/explorer/creatives/${c.id}`
+            : `/advertisers/${advertiserId}/creatives/${c.id}`;
+
+          return {
+            id: c.id,
+            name: c.name,
+            type: c.type,
+            size: sizeStr,
+            status: 'Active',
+            thumbnailUrl: simulatedThumb,
+            placementIds: [],
+            externalUrl: `${baseUrl}${creativePath}`
+          };
+        });
+        setCreatives(mappedCreatives);
+        console.log(`✅ ${mappedCreatives.length} creatividades cargadas.`);
+      } else {
+        setCreatives([]);
+        console.log("ℹ️ No se encontraron creatividades para este anunciante.");
+      }
+    } catch (e) {
+      console.error("Fetch creatives error:", e);
+    }
+  };
+
+  const fetchCreatives = async () => {
+    if (accessToken && profileId && selectedAdvertiser) {
+      await fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
+    }
   };
 
   const loginWithToken = async (token: string) => {
@@ -300,8 +357,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       selectedAdvertiser, selectedCampaign, currentView,
       setSelectedAdvertiser, setSelectedCampaign, setCurrentView,
       addPlacements, updatePlacement, deletePlacement,
-      connectionStatus, isAuthenticated, accessToken, profileId, user, login, loginWithToken, enterDemoMode, logout,
-      fetchAdvertisers, fetchCampaigns
+      connectionStatus, isAuthenticated, accessToken, profileId, accountId, user, login, loginWithToken, enterDemoMode, logout,
+      fetchAdvertisers, fetchCampaigns, fetchCreatives
     }}>
       {children}
     </AppContext.Provider>

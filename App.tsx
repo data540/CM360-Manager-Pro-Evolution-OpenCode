@@ -3,6 +3,7 @@ import React from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import Sidebar from './components/Sidebar';
 import PlacementGrid from './components/PlacementGrid';
+import CreativeGrid from './components/CreativeGrid';
 import AIHelper from './components/AIHelper';
 import Login from './components/Login';
 import { ChevronRight, Settings, LogOut, ExternalLink } from 'lucide-react';
@@ -87,20 +88,7 @@ const MainContent: React.FC = () => {
           </div>
         );
       case 'Creatives':
-        return (
-          <div className="flex-1 flex items-center justify-center bg-slate-950/20">
-             <div className="text-center p-12 glass border-slate-800/50 rounded-[2rem] max-w-md">
-              <div className="w-16 h-16 bg-indigo-600/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                <Settings className="w-8 h-8 text-indigo-500" />
-              </div>
-              <h1 className="text-2xl font-bold mb-3 text-white">Asset Manager</h1>
-              <p className="text-slate-500 text-sm leading-relaxed mb-8">Synchronization with Creative Asset Library. Manage tags, HTML5 packages, and video transcodes.</p>
-              <button className="w-full py-3 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded-xl font-bold transition-all">
-                Connect Asset Library
-              </button>
-            </div>
-          </div>
-        );
+        return <CreativeGrid />;
       default:
         return (
           <div className="flex items-center justify-center h-full text-slate-600 italic font-mono text-xs uppercase tracking-tighter">
