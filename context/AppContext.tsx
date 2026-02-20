@@ -41,22 +41,23 @@ interface AppContextType {
   fetchAdvertisers: () => Promise<void>;
   fetchCampaigns: (advertiserId: string) => Promise<void>;
   fetchCreatives: () => Promise<void>;
-  createCampaign: (campaign: Partial<Campaign>) => Promise<boolean>;
-  pushPlacements: (placementIds: string[]) => Promise<{success: number, failed: number}>;
-  uploadCreative: (file: File, name: string, type: string) => Promise<boolean>;
+  fetchSites: () => Promise<void>;
+  createCampaign: (campaign: Partial<Campaign>) => Promise<{success: boolean, id?: string, error?: string}>;
+  pushPlacements: (placementIds: string[]) => Promise<{success: number, failed: number, error?: string, createdItems: {id: string, cmId: string, name: string}[]}>;
+  uploadCreative: (file: File, name: string, type: string) => Promise<{success: boolean, id?: string, error?: string}>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const DEFAULT_CLIENT_ID = "547547481261-0o6coge0fufp839q33ekv7hk1930m7o1.apps.googleusercontent.com";
-const CM360_SCOPES = "https://www.googleapis.com/auth/dfareporting openid profile email";
+const CM360_SCOPES = "https://www.googleapis.com/auth/dfareporting https://www.googleapis.com/auth/dfatrafficking openid profile email";
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [advertisers, setAdvertisers] = useState<Advertiser[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [placements, setPlacements] = useState<Placement[]>([]);
   const [creatives, setCreatives] = useState<Creative[]>([]);
-  const [sites] = useState<Site[]>(MOCK_SITES);
+  const [sites, setSites] = useState<Site[]>([]);
   
   const [selectedAdvertiser, setSelectedAdvertiser] = useState<Advertiser | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
@@ -80,6 +81,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const client = (window as any).google.accounts.oauth2.initTokenClient({
           client_id: clientId || DEFAULT_CLIENT_ID,
           scope: CM360_SCOPES,
+          prompt: 'consent',
           callback: async (response: any) => {
             if (response.error) {
               console.error("GSI Error Callback:", response);
@@ -252,6 +254,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (isAuthenticated && accessToken && profileId && selectedAdvertiser) {
       fetchCampaignsInternal(accessToken, profileId, selectedAdvertiser.id);
       fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
+      fetchSitesInternal(accessToken, profileId);
     }
   }, [selectedAdvertiser, isAuthenticated, accessToken, profileId]);
 
@@ -313,8 +316,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const fetchSitesInternal = async (token: string, pid: string) => {
+    try {
+      console.log("📡 Cargando sitios...");
+      const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${pid}/sites?maxResults=100`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.sites) {
+        setSites(data.sites.map((s: any) => ({ id: s.id, name: s.name, url: s.keyName })));
+        console.log(`✅ ${data.sites.length} sitios cargados.`);
+      }
+    } catch (e) {
+      console.error("Fetch sites error:", e);
+    }
+  };
+
+  const fetchSites = async () => {
+    if (accessToken && profileId) await fetchSitesInternal(accessToken, profileId);
+  };
+
   const createCampaign = async (campaignData: Partial<Campaign>) => {
-    if (!accessToken || !profileId || !selectedAdvertiser) return false;
+    if (!accessToken || !profileId || !selectedAdvertiser) return { success: false, error: 'No connection' };
     try {
       const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/campaigns`, {
         method: 'POST',
@@ -331,21 +354,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           defaultLandingPageUrl: 'https://www.aireuropa.com'
         })
       });
+      const data = await res.json();
       if (res.ok) {
         await fetchCampaignsInternal(accessToken, profileId, selectedAdvertiser.id);
-        return true;
+        return { success: true, id: data.id };
       }
-      return false;
+      return { success: false, error: data.error?.message || 'API Error' };
     } catch (e) {
       console.error("Create campaign error:", e);
-      return false;
+      return { success: false, error: 'Network error' };
     }
   };
 
   const pushPlacements = async (placementIds: string[]) => {
-    if (!accessToken || !profileId) return { success: 0, failed: placementIds.length };
+    if (!accessToken || !profileId) return { success: 0, failed: placementIds.length, createdItems: [] };
     let successCount = 0;
     let failedCount = 0;
+    let lastError = '';
+    const createdItems: {id: string, cmId: string, name: string}[] = [];
 
     const placementsToPush = placements.filter(p => placementIds.includes(p.id));
 
@@ -361,10 +387,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             campaignId: p.campaignId,
             name: p.name,
             siteId: p.siteId,
+            compatibility: p.type === 'Video' ? 'IN_STREAM_VIDEO' : 'DISPLAY',
             size: {
-              width: p.size.split('x')[0],
-              height: p.size.split('x')[1]
+              width: p.size.includes('x') ? p.size.split('x')[0] : (p.type === 'Video' ? '640' : '300'),
+              height: p.size.includes('x') ? p.size.split('x')[1] : (p.type === 'Video' ? '480' : '250')
             },
+            tagFormats: p.type === 'Video' 
+              ? ["PLACEMENT_TAG_INSTREAM_VIDEO_PREFETCH"] 
+              : ["PLACEMENT_TAG_STANDARD", "PLACEMENT_TAG_IFRAME_JAVASCRIPT", "PLACEMENT_TAG_INTERNAL_REDIRECT"],
             paymentSource: 'PLACEMENT_AGENCY_PAID',
             pricingSchedule: {
               pricingType: 'PRICING_TYPE_CPM',
@@ -373,22 +403,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             }
           })
         });
+        
+        const data = await res.json();
+        
         if (res.ok) {
           successCount++;
-          // Update local status
+          createdItems.push({ id: p.id, cmId: data.id, name: p.name });
           setPlacements(prev => prev.map(item => item.id === p.id ? { ...item, status: 'Active' } : item));
         } else {
           failedCount++;
+          lastError = data.error?.message || `Error ${res.status}`;
+          console.error("Placement push failed:", data);
         }
-      } catch (e) {
+      } catch (e: any) {
         failedCount++;
+        lastError = e.message;
       }
     }
-    return { success: successCount, failed: failedCount };
+    return { success: successCount, failed: failedCount, error: lastError, createdItems };
   };
 
   const uploadCreative = async (file: File, name: string, type: string) => {
-    if (!accessToken || !profileId || !selectedAdvertiser) return false;
+    if (!accessToken || !profileId || !selectedAdvertiser) return { success: false, error: 'No connection' };
     try {
       // 1. Insert Creative Asset
       const metadata = { fileName: file.name, assetIdentifier: { type: 'HTML_ASSET', name: file.name } };
@@ -402,7 +438,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         body: formData
       });
 
-      if (!assetRes.ok) return false;
+      if (!assetRes.ok) return { success: false, error: 'Asset upload failed' };
       const assetData = await assetRes.json();
 
       // 2. Insert Creative
@@ -424,14 +460,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         })
       });
 
+      const creativeData = await creativeRes.json();
       if (creativeRes.ok) {
         await fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
-        return true;
+        return { success: true, id: creativeData.id };
       }
-      return false;
+      return { success: false, error: creativeData.error?.message || 'Creative creation failed' };
     } catch (e) {
       console.error("Upload creative error:", e);
-      return false;
+      return { success: false, error: 'Network error' };
     }
   };
 
@@ -483,7 +520,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setSelectedAdvertiser, setSelectedCampaign, setCurrentView,
       addPlacements, updatePlacement, deletePlacement,
       connectionStatus, isAuthenticated, accessToken, profileId, accountId, user, login, loginWithToken, enterDemoMode, logout,
-      fetchAdvertisers, fetchCampaigns, fetchCreatives, createCampaign, pushPlacements, uploadCreative
+      fetchAdvertisers, fetchCampaigns, fetchCreatives, fetchSites, createCampaign, pushPlacements, uploadCreative
     }}>
       {children}
     </AppContext.Provider>

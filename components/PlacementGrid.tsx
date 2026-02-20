@@ -16,23 +16,57 @@ import {
   Zap,
   Layers,
   AlertCircle,
-  PlusCircle
+  PlusCircle,
+  RefreshCw,
+  CheckCircle2
 } from 'lucide-react';
+import Toast from './Toast';
 
 const PlacementGrid: React.FC = () => {
-  const { placements, selectedCampaign, deletePlacement, pushPlacements } = useApp();
+  const { placements, selectedCampaign, deletePlacement, pushPlacements, accountId, selectedAdvertiser } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [isCreatorOpen, setIsCreatorOpen] = useState(false);
-  const [isPushing, setIsPushing] = useState(false);
+  
+  const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'loading', message: string, details?: string, link?: string}>({
+    show: false,
+    type: 'loading',
+    message: ''
+  });
 
   const handlePushToCM360 = async () => {
     if (selectedRows.size === 0) return;
-    setIsPushing(true);
+    
+    setToast({
+      show: true,
+      type: 'loading',
+      message: `Pushing ${selectedRows.size} placements to CM360...`,
+      details: 'Connecting to Google API and registering entities.'
+    });
+
     const result = await pushPlacements(Array.from(selectedRows));
-    setIsPushing(false);
-    alert(`Push complete: ${result.success} succeeded, ${result.failed} failed.`);
+    
+    if (result.success > 0) {
+      const lastItem = result.createdItems[result.createdItems.length - 1];
+      const verifyLink = `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}/advertisers/${selectedAdvertiser?.id}/placements/${lastItem.cmId}`;
+      
+      setToast({
+        show: true,
+        type: 'success',
+        message: 'Push Successful!',
+        details: `${result.success} placements registered correctly in Campaign Manager. ${result.failed > 0 ? `${result.failed} failed.` : ''}`,
+        link: verifyLink
+      });
+    } else {
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'Push Failed',
+        details: result.error || 'None of the selected placements could be registered. Check API permissions.'
+      });
+    }
+    
     setSelectedRows(new Set());
   };
 
@@ -112,10 +146,10 @@ const PlacementGrid: React.FC = () => {
           </button>
           <button 
             onClick={handlePushToCM360}
-            disabled={selectedRows.size === 0 || isPushing}
+            disabled={selectedRows.size === 0 || toast.type === 'loading' && toast.show}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:grayscale"
           >
-            {isPushing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+            {toast.type === 'loading' && toast.show ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
             Push to CM360 ({selectedRows.size})
           </button>
           <button 
@@ -244,6 +278,11 @@ const PlacementGrid: React.FC = () => {
       {isCreatorOpen && (
         <PlacementCreator onClose={() => setIsCreatorOpen(false)} />
       )}
+
+      <Toast 
+        {...toast} 
+        onClose={() => setToast(prev => ({ ...prev, show: false }))} 
+      />
     </div>
   );
 };

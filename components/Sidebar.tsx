@@ -12,8 +12,10 @@ import {
   Circle,
   Database,
   RefreshCw,
-  Plus
+  Plus,
+  ExternalLink
 } from 'lucide-react';
+import Toast from './Toast';
 
 const Sidebar: React.FC = () => {
   const { 
@@ -29,27 +31,53 @@ const Sidebar: React.FC = () => {
     fetchAdvertisers,
     isAuthenticated,
     fetchCampaigns,
-    createCampaign
+    createCampaign,
+    accountId
   } = useApp();
 
   const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
   const [newCampaignName, setNewCampaignName] = useState('');
-  const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
+  
+  const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'loading', message: string, details?: string, link?: string}>({
+    show: false,
+    type: 'loading',
+    message: ''
+  });
 
   const handleCreateCampaign = async () => {
     if (!newCampaignName || !selectedAdvertiser) return;
-    setIsCreatingCampaign(true);
-    const success = await createCampaign({
+    
+    setToast({
+      show: true,
+      type: 'loading',
+      message: 'Creating campaign in CM360...',
+      details: `Registering "${newCampaignName}" in advertiser ${selectedAdvertiser.name}.`
+    });
+
+    const result = await createCampaign({
       name: newCampaignName,
       startDate: new Date().toISOString().split('T')[0],
       endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
     });
-    setIsCreatingCampaign(false);
-    if (success) {
+    
+    if (result.success) {
+      const verifyLink = `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}/advertisers/${selectedAdvertiser.id}/campaigns/${result.id}`;
+      setToast({
+        show: true,
+        type: 'success',
+        message: 'Campaign Created!',
+        details: 'The campaign has been successfully registered in Campaign Manager.',
+        link: verifyLink
+      });
       setIsCampaignModalOpen(false);
       setNewCampaignName('');
     } else {
-      alert('Failed to create campaign.');
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'Creation Failed',
+        details: result.error || 'Check API permissions or campaign name uniqueness.'
+      });
     }
   };
 
@@ -214,16 +242,21 @@ const Sidebar: React.FC = () => {
                 </button>
                 <button 
                   onClick={handleCreateCampaign}
-                  disabled={!newCampaignName || isCreatingCampaign}
+                  disabled={!newCampaignName || toast.type === 'loading' && toast.show}
                   className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20 disabled:opacity-50"
                 >
-                  {isCreatingCampaign ? <RefreshCw className="w-4 h-4 animate-spin mx-auto" /> : 'Create Campaign'}
+                  {toast.type === 'loading' && toast.show ? <RefreshCw className="w-4 h-4 animate-spin mx-auto" /> : 'Create Campaign'}
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      <Toast 
+        {...toast} 
+        onClose={() => setToast(prev => ({ ...prev, show: false }))} 
+      />
     </div>
   );
 };

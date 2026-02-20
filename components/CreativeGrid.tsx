@@ -15,29 +15,53 @@ import {
   RefreshCw,
   AlertCircle,
   Copy,
-  Check
+  Check,
+  Plus
 } from 'lucide-react';
+import Toast from './Toast';
 
 const CreativeGrid: React.FC = () => {
-  const { creatives, selectedAdvertiser, fetchCreatives, connectionStatus, uploadCreative } = useApp();
+  const { creatives, selectedAdvertiser, fetchCreatives, connectionStatus, uploadCreative, accountId } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [loading, setLoading] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  
+  const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'loading', message: string, details?: string, link?: string}>({
+    show: false,
+    type: 'loading',
+    message: ''
+  });
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedAdvertiser) return;
 
-    setIsUploading(true);
-    const success = await uploadCreative(file, file.name.split('.')[0], 'Display');
-    setIsUploading(false);
+    setToast({
+      show: true,
+      type: 'loading',
+      message: 'Uploading creative to CM360...',
+      details: `Processing ${file.name} and registering asset.`
+    });
+
+    const result = await uploadCreative(file, file.name.split('.')[0], 'Display');
     
-    if (success) {
-      alert('Creative uploaded successfully!');
+    if (result.success) {
+      const verifyLink = `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}/advertisers/${selectedAdvertiser.id}/creatives/${result.id}`;
+      setToast({
+        show: true,
+        type: 'success',
+        message: 'Upload Successful!',
+        details: 'The creative has been registered and is now available in Campaign Manager.',
+        link: verifyLink
+      });
     } else {
-      alert('Failed to upload creative.');
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'Upload Failed',
+        details: result.error || 'Check your internet connection and API permissions.'
+      });
     }
   };
 
@@ -115,9 +139,9 @@ const CreativeGrid: React.FC = () => {
             />
             <label 
               htmlFor="creative-upload"
-              className={`flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-blue-500/20 cursor-pointer ${isUploading ? 'opacity-50 pointer-events-none' : ''}`}
+              className={`flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-blue-500/20 cursor-pointer ${toast.type === 'loading' && toast.show ? 'opacity-50 pointer-events-none' : ''}`}
             >
-              {isUploading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+              {toast.type === 'loading' && toast.show ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
               Upload Creative
             </label>
           </div>
@@ -298,6 +322,10 @@ const CreativeGrid: React.FC = () => {
           </div>
         )}
       </div>
+      <Toast 
+        {...toast} 
+        onClose={() => setToast(prev => ({ ...prev, show: false }))} 
+      />
     </div>
   );
 };

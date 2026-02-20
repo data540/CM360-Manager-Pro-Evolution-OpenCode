@@ -35,7 +35,7 @@ const BulkCreateWizard: React.FC<BulkCreateWizardProps> = ({ onClose }) => {
       return {
         id: `batch-${idx}`,
         name: parts[0] || `Placement_${idx + 1}`,
-        siteId: parts[1] || sites[0]?.id || 'site-1',
+        siteId: parts[1] || (sites.length > 0 ? sites[0].id : ''),
         size: parts[2] || '300x250',
         startDate: selectedCampaign?.startDate || '2024-01-01',
         endDate: selectedCampaign?.endDate || '2024-12-31',

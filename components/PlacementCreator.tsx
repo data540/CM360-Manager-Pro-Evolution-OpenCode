@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { CM360_SIZES, PLACEMENT_STRATEGIES, NAMING_TAXONOMY } from '../constants';
 import { X, Plus, Layers, Check, Info, Calendar, Globe, Settings2, Tag } from 'lucide-react';
@@ -27,6 +27,12 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
 
   const [selectedSiteId, setSelectedSiteId] = useState(sites[0]?.id || '');
   const [type, setType] = useState<'Display' | 'Video' | 'Native'>('Display');
+
+  useEffect(() => {
+    if (sites.length > 0 && !selectedSiteId) {
+      setSelectedSiteId(sites[0].id);
+    }
+  }, [sites, selectedSiteId]);
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
   const [startDate, setStartDate] = useState(selectedCampaign?.startDate || '');
   const [endDate, setEndDate] = useState(selectedCampaign?.endDate || '');
@@ -194,13 +200,19 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
                 <h3 className="text-[10px] uppercase font-bold tracking-widest text-slate-500 flex items-center gap-2">
                   <Globe className="w-3 h-3" /> CM360 Site Mapping
                 </h3>
-                <select 
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
-                  value={selectedSiteId}
-                  onChange={(e) => setSelectedSiteId(e.target.value)}
-                >
-                  {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+                {sites.length === 0 ? (
+                  <div className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-500 italic">
+                    Loading sites from CM360...
+                  </div>
+                ) : (
+                  <select 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+                    value={selectedSiteId}
+                    onChange={(e) => setSelectedSiteId(e.target.value)}
+                  >
+                    {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                )}
               </section>
 
               <section className="space-y-4">
@@ -315,7 +327,7 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
             </button>
             <button 
               onClick={handleCreate}
-              disabled={selectedSizes.length === 0}
+              disabled={selectedSizes.length === 0 || sites.length === 0}
               className="flex items-center gap-2 px-8 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-sm transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50 disabled:grayscale"
             >
               Generate {selectedSizes.length} Placements
