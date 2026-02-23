@@ -18,7 +18,8 @@ import {
   AlertCircle,
   PlusCircle,
   RefreshCw,
-  CheckCircle2
+  CheckCircle2,
+  ExternalLink
 } from 'lucide-react';
 import Toast from './Toast';
 
@@ -49,7 +50,12 @@ const PlacementGrid: React.FC = () => {
     
     if (result.success > 0) {
       const lastItem = result.createdItems[result.createdItems.length - 1];
-      const verifyLink = `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}/advertisers/${selectedAdvertiser?.id}/placements/${lastItem.cmId}`;
+      const baseUrl = `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}`;
+      const placementPath = selectedCampaign 
+        ? `/campaigns/${selectedCampaign.id}/explorer/placements/${lastItem.cmId}`
+        : `/advertisers/${selectedAdvertiser?.id}/placements/${lastItem.cmId}`;
+      
+      const verifyLink = `${baseUrl}${placementPath}`;
       
       setToast({
         show: true,
@@ -238,9 +244,22 @@ const PlacementGrid: React.FC = () => {
                   {p.startDate} <span className="mx-1 text-slate-800">—</span> {p.endDate}
                 </td>
                 <td className="p-4">
-                  <button className="p-1.5 rounded-md text-slate-600 hover:bg-slate-800 hover:text-slate-300 transition-all">
-                    <MoreVertical className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {p.externalUrl && (
+                      <a 
+                        href={p.externalUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="p-1.5 rounded-md text-blue-400 hover:bg-blue-400/10 transition-all"
+                        title="Open in CM360"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                    )}
+                    <button className="p-1.5 rounded-md text-slate-600 hover:bg-slate-800 hover:text-slate-300 transition-all">
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

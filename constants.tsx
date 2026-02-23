@@ -24,8 +24,8 @@ export const MOCK_SITES: Site[] = [
 ];
 
 export const MOCK_PLACEMENTS: Placement[] = [
-  { id: 'plc-1', campaignId: 'camp-1', name: 'US_YT_PreRoll_15s_Tech_A', siteId: 'site-1', size: 'Video', type: 'Video', status: 'Active', startDate: '2024-10-01', endDate: '2024-12-31', createdAt: '2023-09-15', updatedAt: '2023-09-15' },
-  { id: 'plc-2', campaignId: 'camp-1', name: 'UK_NYT_Leaderboard_728x90', siteId: 'site-2', size: '728x90', type: 'Display', status: 'Active', startDate: '2024-10-01', endDate: '2024-12-31', createdAt: '2023-09-15', updatedAt: '2023-09-15' },
+  { id: 'plc-1', campaignId: 'camp-1', name: 'US_YT_PreRoll_15s_Tech_A', siteId: 'site-1', size: 'Video', type: 'Video', compatibility: 'IN_STREAM_VIDEO', status: 'Active', startDate: '2024-10-01', endDate: '2024-12-31', createdAt: '2023-09-15', updatedAt: '2023-09-15' },
+  { id: 'plc-2', campaignId: 'camp-1', name: 'UK_NYT_Leaderboard_728x90', siteId: 'site-2', size: '728x90', type: 'Display', compatibility: 'DISPLAY', status: 'Active', startDate: '2024-10-01', endDate: '2024-12-31', createdAt: '2023-09-15', updatedAt: '2023-09-15' },
 ];
 
 export const MOCK_CREATIVES: Creative[] = [
@@ -62,4 +62,39 @@ export const NAMING_TAXONOMY = {
   Device: ['desktop', 'mobile', 'all'],
   Tech: ['dv360', 'dv360-prem', 'quantcast', 'taboola', 'outbrain', 'stackadapt', 'ttd', 'amazon', 'directo', 'microsoft', 'mediasmart', 'addor'],
   Formats: ['gen', 'rich', 'dyn', 'vid']
+};
+
+export const CM360_ERROR_MAPPING: Record<string, { title: string, description: string }> = {
+  '100012': {
+    title: 'Conflicto de Tipo y Rol',
+    description: 'El tipo de archivo no coincide con la función asignada. Se ha corregido la nomenclatura interna de "HTML" para evitar este conflicto en archivos de imagen y banners.'
+  },
+  '100008': {
+    title: 'Nombre Duplicado',
+    description: 'Ya existe una creatividad con este nombre en este anunciante. Cambia el nombre base.'
+  },
+  '100013': {
+    title: 'Dimensiones Incorrectas',
+    description: 'El tamaño del archivo no coincide con las dimensiones especificadas en la configuración.'
+  },
+  '100005': {
+    title: 'Permiso Denegado',
+    description: 'Tu perfil de CM360 no tiene permisos de escritura o el anunciante está bloqueado.'
+  },
+  '401': {
+    title: 'Sesión Expirada',
+    description: 'Tu token de acceso ha caducado. Por favor, cierra sesión y vuelve a entrar.'
+  },
+  '403': {
+    title: 'Acceso Prohibido',
+    description: 'No tienes los scopes necesarios o la API de CM360 no está habilitada en tu proyecto.'
+  },
+  'Network error': {
+    title: 'Error de Red',
+    description: 'No se pudo contactar con los servidores de Google. Revisa tu conexión.'
+  },
+  'default': {
+    title: 'Error Desconocido',
+    description: 'Ha ocurrido un problema inesperado en la API de Campaign Manager.'
+  }
 };

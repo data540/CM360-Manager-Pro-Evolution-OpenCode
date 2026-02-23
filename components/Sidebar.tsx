@@ -37,6 +37,8 @@ const Sidebar: React.FC = () => {
 
   const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
   const [newCampaignName, setNewCampaignName] = useState('');
+  const [advertiserSearch, setAdvertiserSearch] = useState('');
+  const [campaignSearch, setCampaignSearch] = useState('');
   
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'loading', message: string, details?: string, link?: string}>({
     show: false,
@@ -89,8 +91,15 @@ const Sidebar: React.FC = () => {
     { type: 'Settings', icon: SettingsIcon, label: 'Settings' },
   ];
 
+  const filteredAdvertisers = advertisers.filter(a => 
+    a.name.toLowerCase().includes(advertiserSearch.toLowerCase())
+  );
+
   const filteredCampaigns = selectedAdvertiser 
-    ? campaigns.filter(c => c.advertiserId === selectedAdvertiser.id)
+    ? campaigns.filter(c => 
+        c.advertiserId === selectedAdvertiser.id && 
+        c.name.toLowerCase().includes(campaignSearch.toLowerCase())
+      )
     : [];
 
   return (
@@ -116,20 +125,29 @@ const Sidebar: React.FC = () => {
               </button>
             )}
           </div>
-          <div className="relative">
-            <select 
-              className="w-full bg-slate-900/50 border border-slate-700 text-slate-200 text-sm rounded-md py-2 px-3 appearance-none focus:outline-none focus:border-blue-500 transition-colors"
-              value={selectedAdvertiser?.id || ''}
-              onChange={(e) => {
-                const adv = advertisers.find(a => a.id === e.target.value);
-                setSelectedAdvertiser(adv || null);
-                setSelectedCampaign(null);
-              }}
-            >
-              <option value="">{advertisers.length > 0 ? 'Select Advertiser' : 'No advertisers found'}</option>
-              {advertisers.map(adv => <option key={adv.id} value={adv.id}>{adv.name}</option>)}
-            </select>
-            <ChevronDown className="absolute right-2 top-2.5 w-4 h-4 text-slate-500 pointer-events-none" />
+          <div className="space-y-1.5">
+            <input 
+              type="text"
+              placeholder="Filter advertisers..."
+              className="w-full bg-slate-950/50 border border-slate-800 text-slate-400 text-[10px] rounded-md py-1.5 px-3 focus:outline-none focus:border-blue-500/50 transition-colors"
+              value={advertiserSearch}
+              onChange={(e) => setAdvertiserSearch(e.target.value)}
+            />
+            <div className="relative">
+              <select 
+                className="w-full bg-slate-900/50 border border-slate-700 text-slate-200 text-sm rounded-md py-2 px-3 appearance-none focus:outline-none focus:border-blue-500 transition-colors"
+                value={selectedAdvertiser?.id || ''}
+                onChange={(e) => {
+                  const adv = advertisers.find(a => a.id === e.target.value);
+                  setSelectedAdvertiser(adv || null);
+                  setSelectedCampaign(null);
+                }}
+              >
+                <option value="">{advertisers.length > 0 ? 'Select Advertiser' : 'No advertisers found'}</option>
+                {filteredAdvertisers.map(adv => <option key={adv.id} value={adv.id}>{adv.name}</option>)}
+              </select>
+              <ChevronDown className="absolute right-2 top-2.5 w-4 h-4 text-slate-500 pointer-events-none" />
+            </div>
           </div>
         </div>
 
@@ -157,20 +175,30 @@ const Sidebar: React.FC = () => {
               )}
             </div>
           </div>
-          <div className="relative">
-            <select 
+          <div className="space-y-1.5">
+            <input 
+              type="text"
               disabled={!selectedAdvertiser}
-              className="w-full bg-slate-900/50 border border-slate-700 text-slate-200 text-sm rounded-md py-2 px-3 appearance-none focus:outline-none focus:border-blue-500 disabled:opacity-50 transition-colors"
-              value={selectedCampaign?.id || ''}
-              onChange={(e) => {
-                const camp = campaigns.find(c => c.id === e.target.value);
-                setSelectedCampaign(camp || null);
-              }}
-            >
-              <option value="">{selectedAdvertiser ? 'Select Campaign' : 'Select Advertiser first'}</option>
-              {filteredCampaigns.map(camp => <option key={camp.id} value={camp.id}>{camp.name}</option>)}
-            </select>
-            <ChevronDown className="absolute right-2 top-2.5 w-4 h-4 text-slate-500 pointer-events-none" />
+              placeholder="Filter campaigns..."
+              className="w-full bg-slate-950/50 border border-slate-800 text-slate-400 text-[10px] rounded-md py-1.5 px-3 focus:outline-none focus:border-blue-500/50 transition-colors disabled:opacity-50"
+              value={campaignSearch}
+              onChange={(e) => setCampaignSearch(e.target.value)}
+            />
+            <div className="relative">
+              <select 
+                disabled={!selectedAdvertiser}
+                className="w-full bg-slate-900/50 border border-slate-700 text-slate-200 text-sm rounded-md py-2 px-3 appearance-none focus:outline-none focus:border-blue-500 disabled:opacity-50 transition-colors"
+                value={selectedCampaign?.id || ''}
+                onChange={(e) => {
+                  const camp = campaigns.find(c => c.id === e.target.value);
+                  setSelectedCampaign(camp || null);
+                }}
+              >
+                <option value="">{selectedAdvertiser ? 'Select Campaign' : 'Select Advertiser first'}</option>
+                {filteredCampaigns.map(camp => <option key={camp.id} value={camp.id}>{camp.name}</option>)}
+              </select>
+              <ChevronDown className="absolute right-2 top-2.5 w-4 h-4 text-slate-500 pointer-events-none" />
+            </div>
           </div>
         </div>
       </div>

@@ -387,7 +387,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             campaignId: p.campaignId,
             name: p.name,
             siteId: p.siteId,
-            compatibility: p.type === 'Video' ? 'IN_STREAM_VIDEO' : 'DISPLAY',
+            compatibility: p.compatibility,
             size: {
               width: p.size.includes('x') ? p.size.split('x')[0] : (p.type === 'Video' ? '640' : '300'),
               height: p.size.includes('x') ? p.size.split('x')[1] : (p.type === 'Video' ? '480' : '250')
@@ -409,7 +409,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (res.ok) {
           successCount++;
           createdItems.push({ id: p.id, cmId: data.id, name: p.name });
-          setPlacements(prev => prev.map(item => item.id === p.id ? { ...item, status: 'Active' } : item));
+          
+          const baseUrl = `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}`;
+          const placementPath = `/campaigns/${p.campaignId}/explorer/placements/${data.id}`;
+          const externalUrl = `${baseUrl}${placementPath}`;
+
+          setPlacements(prev => prev.map(item => item.id === p.id ? { 
+            ...item, 
+            status: 'Active',
+            externalUrl: externalUrl
+          } : item));
         } else {
           failedCount++;
           lastError = data.error?.message || `Error ${res.status}`;
@@ -423,25 +432,67 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return { success: successCount, failed: failedCount, error: lastError, createdItems };
   };
 
-  const uploadCreative = async (file: File, name: string, type: string) => {
+  const uploadCreative = async (file: File, name: string, type: string, sizeStr?: string) => {
     if (!accessToken || !profileId || !selectedAdvertiser) return { success: false, error: 'No connection' };
     try {
-      // 1. Insert Creative Asset
-      const metadata = { fileName: file.name, assetIdentifier: { type: 'HTML_ASSET', name: file.name } };
+      // 1. Detect Asset Type
+      let assetType = 'HTML';
+      if (file.type.startsWith('image/')) assetType = 'IMAGE';
+      else if (file.type.startsWith('video/')) assetType = 'VIDEO';
+      else if (file.name.endsWith('.zip')) assetType = 'HTML';
+
+      // 2. Parse Size
+      let width = 300;
+      let height = 250;
+      if (sizeStr && sizeStr.toLowerCase().includes('x')) {
+        const parts = sizeStr.toLowerCase().replace('×', 'x').split('x');
+        width = parseInt(parts[0]) || 300;
+        height = parseInt(parts[1]) || 250;
+      } else if (sizeStr === 'In-stream' || sizeStr === 'Interstitial') {
+        width = 0;
+        height = 0;
+      }
+
+      // 3. Insert Creative Asset
+      const metadata = { 
+        assetIdentifier: { 
+          type: assetType, 
+          name: file.name 
+        } 
+      };
+
       const formData = new FormData();
       formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
       formData.append('file', file);
 
-      const assetRes = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creativeAssets/${selectedAdvertiser.id}`, {
+      // Note the /upload/ prefix and the ?uploadType=multipart parameter
+      const assetRes = await fetch(`https://dfareporting.googleapis.com/upload/dfareporting/v4/userprofiles/${profileId}/creativeAssets/${selectedAdvertiser.id}/creativeAssets?uploadType=multipart`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}` },
         body: formData
       });
 
-      if (!assetRes.ok) return { success: false, error: 'Asset upload failed' };
+      if (!assetRes.ok) {
+        const errorData = await assetRes.json();
+        return { success: false, error: errorData.error?.message || 'Asset upload failed' };
+      }
       const assetData = await assetRes.json();
 
-      // 2. Insert Creative
+      // 4. Insert Creative
+      const isVideoCreative = type === 'Video';
+      let creativeType = isVideoCreative ? 'INSTREAM_VIDEO' : 'DISPLAY';
+      
+      // If it's a display format but the asset is an image, CM360 requires the creative type to be 'IMAGE'
+      if (!isVideoCreative && assetType === 'IMAGE') {
+        creativeType = 'IMAGE';
+      }
+      
+      // Determine correct role based on asset type and creative type
+      let assetRole = 'PRIMARY';
+      if (isVideoCreative && assetType === 'VIDEO') {
+        assetRole = 'PARENT_VIDEO';
+      }
+
       const creativeRes = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creatives`, {
         method: 'POST',
         headers: {
@@ -451,11 +502,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         body: JSON.stringify({
           advertiserId: selectedAdvertiser.id,
           name: name,
-          type: type === 'Video' ? 'INSTREAM_VIDEO' : 'DISPLAY',
-          size: { width: 300, height: 250 }, // Simplified
+          type: creativeType,
+          size: { width, height },
           creativeAssets: [{
             assetIdentifier: assetData.assetIdentifier,
-            role: 'PRIMARY'
+            role: assetRole
           }]
         })
       });
@@ -466,9 +517,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return { success: true, id: creativeData.id };
       }
       return { success: false, error: creativeData.error?.message || 'Creative creation failed' };
-    } catch (e) {
+    } catch (e: any) {
       console.error("Upload creative error:", e);
-      return { success: false, error: 'Network error' };
+      return { success: false, error: e.message || 'Network error' };
     }
   };
 

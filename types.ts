@@ -31,12 +31,14 @@ export interface Placement {
   siteId: string;
   size: string;
   type: 'Display' | 'Video' | 'Native';
+  compatibility: 'DISPLAY' | 'DISPLAY_INTERSTITIAL' | 'IN_STREAM_VIDEO' | 'IN_STREAM_AUDIO';
   status: Status;
   startDate: string;
   endDate: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;
+  externalUrl?: string;
 }
 
 export interface Creative {

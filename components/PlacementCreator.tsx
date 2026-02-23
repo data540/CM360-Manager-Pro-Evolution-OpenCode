@@ -27,6 +27,13 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
 
   const [selectedSiteId, setSelectedSiteId] = useState(sites[0]?.id || '');
   const [type, setType] = useState<'Display' | 'Video' | 'Native'>('Display');
+  const [compatibility, setCompatibility] = useState<'DISPLAY' | 'DISPLAY_INTERSTITIAL' | 'IN_STREAM_VIDEO' | 'IN_STREAM_AUDIO'>('DISPLAY');
+
+  useEffect(() => {
+    // Auto-adjust compatibility when type changes
+    if (type === 'Video') setCompatibility('IN_STREAM_VIDEO');
+    else setCompatibility('DISPLAY');
+  }, [type]);
 
   useEffect(() => {
     if (sites.length > 0 && !selectedSiteId) {
@@ -58,6 +65,7 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
       siteId: selectedSiteId,
       size: size,
       type: type,
+      compatibility: compatibility,
       status: 'Draft',
       startDate: startDate,
       endDate: endDate,
@@ -266,6 +274,20 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
                     {t}
                   </button>
                 ))}
+              </div>
+
+              <div className="space-y-2 mb-6">
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Compatibility (Required for CM360)</label>
+                <select 
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all font-bold"
+                  value={compatibility}
+                  onChange={(e) => setCompatibility(e.target.value as any)}
+                >
+                  <option value="DISPLAY">Display</option>
+                  <option value="DISPLAY_INTERSTITIAL">Display Interstitial</option>
+                  <option value="IN_STREAM_VIDEO">In-Stream Video</option>
+                  <option value="IN_STREAM_AUDIO">In-Stream Audio</option>
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
