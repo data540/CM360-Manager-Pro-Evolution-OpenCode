@@ -25,6 +25,18 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
     format: NAMING_TAXONOMY.Formats[0]
   });
 
+  const [enabledFields, setEnabledFields] = useState<Record<keyof typeof naming, boolean>>({
+    brand: true,
+    iso: true,
+    site: true,
+    campaña: true,
+    canal: true,
+    funnel: true,
+    tech: true,
+    device: true,
+    format: true
+  });
+
   const [selectedSiteId, setSelectedSiteId] = useState(sites[0]?.id || '');
   const [type, setType] = useState<'Display' | 'Video' | 'Native'>('Display');
   const [compatibility, setCompatibility] = useState<'DISPLAY' | 'DISPLAY_INTERSTITIAL' | 'IN_STREAM_VIDEO' | 'IN_STREAM_AUDIO'>('DISPLAY');

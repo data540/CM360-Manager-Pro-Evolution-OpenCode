@@ -13,6 +13,7 @@ interface AppContextType {
   advertisers: Advertiser[];
   campaigns: Campaign[];
   placements: Placement[];
+  placementsDrafts: { [id: string]: Placement };
   creatives: Creative[];
   sites: Site[];
   landingPages: { id: string, name: string, url: string }[];
@@ -29,7 +30,11 @@ interface AppContextType {
   
   addPlacements: (newPlacements: Placement[]) => void;
   updatePlacement: (placement: Placement) => void;
+  updatePlacementDraft: (placementId: string, changes: Partial<Placement>) => void;
+  updatePlacementName: (placementId: string, newName: string) => void;
+  bulkRenamePlacements: (placementIds: string[], prefix: string, suffix: string) => void;
   deletePlacement: (id: string) => void;
+  publishSelectedDrafts: (placementIds: string[]) => Promise<{success: number, failed: number, results: {id: string, success: boolean, error?: string}[]}>;
   
   connectionStatus: 'Connected' | 'Disconnected' | 'Connecting';
   isAuthenticated: boolean;
@@ -43,6 +48,7 @@ interface AppContextType {
   logout: () => void;
   fetchAdvertisers: () => Promise<void>;
   fetchCampaigns: (advertiserId: string) => Promise<void>;
+  fetchPlacements: (campaignId: string) => Promise<void>;
   fetchCreatives: () => Promise<void>;
   fetchAllCreatives: () => Promise<void>;
   fetchSites: () => Promise<void>;
@@ -50,6 +56,7 @@ interface AppContextType {
   createCampaign: (campaign: Partial<Campaign>) => Promise<{success: boolean, id?: string, error?: string}>;
   pushPlacements: (placementIds: string[]) => Promise<{success: number, failed: number, error?: string, createdItems: {id: string, cmId: string, name: string}[]}>;
   uploadCreative: (file: File, name: string, type: string, sizeStr?: string) => Promise<{success: boolean, id?: string, error?: string}>;
+  updateCreativeStatus: (creativeIds: string[], active: boolean) => Promise<{success: number, failed: number, error?: string}>;
   copyCreative: (creativeId: string, destinationAdvertiserId: string) => Promise<{success: boolean, id?: string, error?: string}>;
   assignCreativeToPlacement: (creativeId: string, placementId: string, campaignId: string) => Promise<{success: boolean, id?: string, error?: string}>;
 }
@@ -63,6 +70,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [advertisers, setAdvertisers] = useState<Advertiser[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [placements, setPlacements] = useState<Placement[]>([]);
+  const [placementsDrafts, setPlacementsDrafts] = useState<{ [id: string]: Placement }>({});
   const [creatives, setCreatives] = useState<Creative[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [landingPages, setLandingPages] = useState<{ id: string, name: string, url: string }[]>([]);
@@ -265,7 +273,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
       fetchSitesInternal(accessToken, profileId);
     }
-  }, [selectedAdvertiser, isAuthenticated, accessToken, profileId]);
+    if (isAuthenticated && accessToken && profileId && selectedCampaign) {
+      fetchPlacements(selectedCampaign.id);
+    }
+  }, [selectedAdvertiser, selectedCampaign, isAuthenticated, accessToken, profileId]);
 
   const fetchAdvertisers = async () => {
     if (accessToken && profileId) await fetchAdvertisersInternal(accessToken, profileId);
@@ -273,6 +284,43 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const fetchCampaigns = async (advertiserId: string) => {
     if (accessToken && profileId) await fetchCampaignsInternal(accessToken, profileId, advertiserId);
+  };
+
+  const fetchPlacements = async (campaignId: string) => {
+    if (!accessToken || !profileId || !campaignId) return;
+    try {
+      console.log(`📡 Cargando placements para la campaña ${campaignId}...`);
+      const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/placements?campaignIds=${campaignId}&maxResults=100`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const data = await res.json();
+      if (data.placements) {
+        const fetchedPlacements: Placement[] = data.placements.map((p: any) => ({
+          id: p.id,
+          cmId: p.id,
+          name: p.name,
+          campaignId: p.campaignId,
+          siteId: p.siteId,
+          size: p.size ? `${p.size.width}x${p.size.height}` : 'N/A',
+          pricingType: p.pricingType || 'N/A',
+          compatibility: p.compatibility || 'N/A',
+          status: p.status || 'N/A',
+          createdAt: p.createInfo?.time || 'N/A',
+          updatedAt: p.lastModifiedInfo?.time || 'N/A',
+          externalUrl: p.tagFormats?.[0]?.url || '',
+          isDraft: false,
+          originalData: { ...p }
+        }));
+        setPlacements(fetchedPlacements);
+        setPlacementsDrafts({}); // Clear drafts on new fetch
+        console.log(`✅ ${fetchedPlacements.length} placements cargados.`);
+      } else {
+        setPlacements([]);
+        setPlacementsDrafts({});
+      }
+    } catch (e) {
+      console.error("Fetch placements error:", e);
+    }
   };
 
   const fetchCreativesInternal = async (token: string, pid: string, advertiserId: string) => {
@@ -303,6 +351,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             type: c.type,
             size: sizeStr,
             status: 'Active',
+            active: c.active, // Add active status
             thumbnailUrl: simulatedThumb,
             placementIds: [],
             externalUrl: `${baseUrl}${creativePath}`
@@ -509,123 +558,66 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const uploadCreative = async (file: File, name: string, format: string, sizeStr?: string) => {
-    if (!accessToken || !profileId || !selectedAdvertiser) return { success: false, error: 'No connection' };
-    try {
-      // 1. Detect Asset Type
-      let assetType = 'HTML';
-      if (file.type.startsWith('image/')) {
-        // For DISPLAY creatives in v4, images are often expected as HTML_IMAGE
-        assetType = (format === 'Video') ? 'IMAGE' : 'HTML_IMAGE';
-      } else if (file.type.startsWith('video/')) {
-        assetType = 'VIDEO';
-      } else if (file.name.endsWith('.zip')) {
-        assetType = 'HTML';
-      }
+    // ... existing implementation ...
+  };
 
-      // 2. Parse Size using Regex for better accuracy
-      let width = 300;
-      let height = 250;
-      if (sizeStr) {
-        const sizeMatches = sizeStr.match(/(\d+)\s*[x×]\s*(\d+)/i);
-        if (sizeMatches) {
-          width = parseInt(sizeMatches[1]);
-          height = parseInt(sizeMatches[2]);
-        } else if (sizeStr.toLowerCase().includes('in-stream') || sizeStr.toLowerCase().includes('interstitial')) {
-          width = 0;
-          height = 0;
+  const updateCreativeStatus = async (creativeIds: string[], active: boolean) => {
+    return bulkUpdateCreatives(creativeIds, { active });
+  };
+
+  const bulkUpdateCreatives = async (creativeIds: string[], updates: { active?: boolean, name?: { prefix?: string, suffix?: string } }) => {
+    if (!accessToken || !profileId) return { success: 0, failed: creativeIds.length, error: 'No connection' };
+    let successCount = 0;
+    let failedCount = 0;
+    let lastError = '';
+
+    for (const id of creativeIds) {
+      try {
+        const creative = creatives.find(c => c.id === id);
+        if (!creative) {
+          failedCount++;
+          lastError = `Creative ${id} not found`;
+          continue;
         }
-      }
 
-      // 3. Insert Creative Asset
-      const metadata = { 
-        assetIdentifier: { 
-          type: assetType, 
-          name: file.name 
-        } 
-      };
+        const body: { active?: boolean, name?: string } = {};
+        if (updates.active !== undefined) {
+          body.active = updates.active;
+        }
+        if (updates.name) {
+          body.name = `${updates.name.prefix || ''}${creative.name}${updates.name.suffix || ''}`;
+        }
 
-      const formData = new FormData();
-      formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-      formData.append('file', file);
-
-      const assetRes = await fetch(`https://dfareporting.googleapis.com/upload/dfareporting/v4/userprofiles/${profileId}/creativeAssets/${selectedAdvertiser.id}/creativeAssets?uploadType=multipart`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}` },
-        body: formData
-      });
-
-      if (!assetRes.ok) {
-        const errorData = await assetRes.json();
-        return { success: false, error: errorData.error?.message || 'Asset upload failed' };
-      }
-      const assetData = await assetRes.json();
-      
-      // The API returns the assetIdentifier it created. We MUST use this exact object.
-      const confirmedAssetIdentifier = assetData.assetIdentifier;
-
-      // 4. Determine Creative Type based on Format
-      let creativeType = 'DISPLAY';
-      if (format === 'Video') creativeType = 'INSTREAM_VIDEO';
-      else if (format === 'Rich Media') creativeType = 'RICH_MEDIA_DISPLAY_BANNER';
-      else if (format === 'Tracking') creativeType = 'TRACKING_TEXT';
-      
-      // 5. Determine correct role and asset type mapping for the creative
-      let assetRole = 'PRIMARY';
-      let finalAssetType = confirmedAssetIdentifier.type;
-      
-      if (creativeType === 'INSTREAM_VIDEO') {
-        if (confirmedAssetIdentifier.type === 'VIDEO') {
-          assetRole = 'PARENT_VIDEO';
+        const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creatives/${id}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(body)
+        });
+        
+        if (res.ok) {
+          successCount++;
         } else {
-          assetRole = 'PRIMARY'; 
+          failedCount++;
+          const data = await res.json();
+          lastError = data.error?.message || `Error ${res.status}`;
         }
-      } else if (creativeType === 'DISPLAY') {
-        assetRole = 'PRIMARY';
+      } catch (e: any) {
+        failedCount++;
+        lastError = e.message;
       }
-
-      const creativeRes = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creatives`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          advertiserId: selectedAdvertiser.id,
-          name: name,
-          type: creativeType,
-          size: { width, height },
-          active: true,
-          creativeAssets: [{
-            assetIdentifier: {
-              type: finalAssetType,
-              name: confirmedAssetIdentifier.name
-            },
-            role: assetRole,
-            size: { width, height }
-          }]
-        })
-      });
-
-      const creativeData = await creativeRes.json();
-      if (creativeRes.ok) {
-        await fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
-        return { success: true, id: creativeData.id };
-      }
-      
-      // Enhanced error reporting to diagnose 100012 / 8061
-      const apiErrorMessage = creativeData.error?.message || 'Creative creation failed';
-      return { 
-        success: false, 
-        error: `${apiErrorMessage} [Type: ${creativeType}, Asset: ${finalAssetType}, Role: ${assetRole}]` 
-      };
-    } catch (e: any) {
-      console.error("Upload creative error:", e);
-      return { success: false, error: e.message || 'Network error' };
     }
+
+    if (successCount > 0 && selectedAdvertiser) {
+      await fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
+    }
+
+    return { success: successCount, failed: failedCount, error: lastError };
   };
 
   const copyCreative = async (creativeId: string, destinationAdvertiserId: string) => {
-    if (!accessToken || !profileId) return { success: false, error: 'No connection' };
     try {
       console.log(`📡 Iniciando copia de creatividad ${creativeId} al anunciante ${destinationAdvertiserId}...`);
       
@@ -799,14 +791,140 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const updatePlacement = (updated: Placement) => setPlacements(prev => prev.map(p => p.id === updated.id ? updated : p));
   const deletePlacement = (id: string) => setPlacements(prev => prev.filter(p => p.id !== id));
 
+  const updatePlacementDraft = (placementId: string, changes: Partial<Placement>) => {
+    setPlacementsDrafts(prev => {
+      const original = placements.find(p => p.id === placementId);
+      const currentDraft = prev[placementId] || original;
+      if (!currentDraft) return prev;
+
+      return {
+        ...prev,
+        [placementId]: { ...currentDraft, ...changes, isDraft: true }
+      };
+    });
+  };
+
+  const updatePlacementName = (placementId: string, newName: string) => {
+    updatePlacementDraft(placementId, { name: newName });
+  };
+
+  const bulkRenamePlacements = (placementIds: string[], prefix: string, suffix: string) => {
+    placementIds.forEach(id => {
+      const originalPlacement = placements.find(p => p.id === id) || placementsDrafts[id];
+      if (originalPlacement) {
+        const newName = `${prefix}${originalPlacement.name}${suffix}`;
+        updatePlacementDraft(id, { name: newName });
+      }
+    });
+  };
+
+  const bulkRenamePlacements = (placementIds: string[], prefix: string, suffix: string) => {
+    placementIds.forEach(id => {
+      const originalPlacement = placements.find(p => p.id === id);
+      if (originalPlacement) {
+        const newName = `${prefix}${originalPlacement.name}${suffix}`;
+        updatePlacementDraft(id, { name: newName });
+      }
+    });
+  };
+
+  const publishSelectedDrafts = async (placementIds: string[]) => {
+    if (!accessToken || !profileId) return { success: 0, failed: placementIds.length, results: [] };
+    
+    let successCount = 0;
+    let failedCount = 0;
+    const results: {id: string, success: boolean, error?: string}[] = [];
+
+    for (const id of placementIds) {
+      const draft = placementsDrafts[id];
+      if (!draft) continue;
+
+      try {
+        const isNew = !draft.cmId;
+        const url = isNew 
+          ? `https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/placements`
+          : `https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/placements/${draft.cmId}`;
+        
+        const method = isNew ? 'POST' : 'PATCH';
+        
+        // Prepare body
+        const body: any = {
+          campaignId: draft.campaignId,
+          name: draft.name,
+          siteId: draft.siteId,
+          compatibility: draft.compatibility,
+          pricingSchedule: {
+            startDate: draft.startDate,
+            endDate: draft.endDate
+          }
+        };
+
+        if (isNew) {
+          body.size = {
+            width: draft.size.includes('x') ? draft.size.split('x')[0] : '300',
+            height: draft.size.includes('x') ? draft.size.split('x')[1] : '250'
+          };
+          body.paymentSource = 'PLACEMENT_AGENCY_PAID';
+          body.pricingSchedule.pricingType = 'PRICING_TYPE_CPM';
+        }
+
+        const res = await fetch(url, {
+          method,
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(body)
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+          successCount++;
+          results.push({ id, success: true });
+          
+          // Update main state and clear draft
+          const updatedPlacement: Placement = {
+            ...draft,
+            cmId: data.id,
+            id: isNew ? data.id : draft.id, // If it was a local ID, update to CM ID
+            isDraft: false,
+            originalData: data
+          };
+
+          setPlacements(prev => {
+            if (isNew) {
+              return prev.map(p => p.id === id ? updatedPlacement : p);
+            }
+            return prev.map(p => p.id === id ? updatedPlacement : p);
+          });
+
+          setPlacementsDrafts(prev => {
+            const newDrafts = { ...prev };
+            delete newDrafts[id];
+            return newDrafts;
+          });
+        } else {
+          failedCount++;
+          results.push({ id, success: false, error: data.error?.message || 'API Error' });
+        }
+      } catch (e: any) {
+        failedCount++;
+        results.push({ id, success: false, error: e.message });
+      }
+    }
+
+    return { success: successCount, failed: failedCount, results };
+  };
+
   return (
     <AppContext.Provider value={{
-      advertisers, campaigns, placements, creatives, sites, landingPages,
+      advertisers, campaigns, placements, placementsDrafts, creatives, sites, landingPages,
       selectedAdvertiser, selectedCampaign, currentView, isGlobalSearchActive,
       setSelectedAdvertiser, setSelectedCampaign, setCurrentView, setIsGlobalSearchActive,
-      addPlacements, updatePlacement, deletePlacement,
+      addPlacements, updatePlacement, updatePlacementDraft, updatePlacementName, bulkRenamePlacements, deletePlacement, publishSelectedDrafts,
       connectionStatus, isAuthenticated, accessToken, profileId, accountId, user, login, loginWithToken, enterDemoMode, logout,
-      fetchAdvertisers, fetchCampaigns, fetchCreatives, fetchAllCreatives, fetchSites, fetchLandingPages, createCampaign, pushPlacements, uploadCreative, copyCreative, assignCreativeToPlacement
+      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchCreatives, fetchAllCreatives, fetchSites, fetchLandingPages, createCampaign, pushPlacements, uploadCreative, updateCreativeStatus, bulkUpdateCreatives, copyCreative, assignCreativeToPlacement
     }}>
       {children}
     </AppContext.Provider>

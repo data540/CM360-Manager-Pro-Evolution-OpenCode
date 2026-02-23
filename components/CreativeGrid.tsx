@@ -49,6 +49,8 @@ const CreativeGrid: React.FC = () => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isNewMenuOpen, setIsNewMenuOpen] = useState(false);
+  const [selectedCreatives, setSelectedCreatives] = useState<string[]>([]);
+  const [isSelectAll, setIsSelectAll] = useState(false);
   
   // Assign to Advertiser States
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);

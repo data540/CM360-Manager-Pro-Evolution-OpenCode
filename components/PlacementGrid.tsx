@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Placement } from '../types';
-import BulkCreateWizard from './BulkCreateWizard';
+import BulkNamingModal, { BulkNamingConfig } from './BulkNamingModal';
 import PlacementCreator from './PlacementCreator';
 import { 
   MoreVertical, 
@@ -24,7 +24,19 @@ import {
 import Toast from './Toast';
 
 const PlacementGrid: React.FC = () => {
-  const { placements, creatives, selectedCampaign, deletePlacement, pushPlacements, accountId, selectedAdvertiser, assignCreativeToPlacement } = useApp();
+  const { 
+    placements, 
+    placementsDrafts, 
+    creatives, 
+    selectedCampaign, 
+    deletePlacement, 
+    pushPlacements, 
+    publishSelectedDrafts,
+    updatePlacementName,
+    accountId, 
+    selectedAdvertiser, 
+    assignCreativeToPlacement 
+  } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [isWizardOpen, setIsWizardOpen] = useState(false);
@@ -32,6 +44,9 @@ const PlacementGrid: React.FC = () => {
   const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
   const [activePlacement, setActivePlacement] = useState<Placement | null>(null);
   const [creativeSearch, setCreativeSearch] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [isBulkNamingOpen, setIsBulkNamingOpen] = useState(false);
   
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'loading', message: string, details?: string, link?: string}>({
     show: false,
@@ -45,41 +60,32 @@ const PlacementGrid: React.FC = () => {
     setToast({
       show: true,
       type: 'loading',
-      message: `Pushing ${selectedRows.size} placements to CM360...`,
-      details: 'Connecting to Google API and registering entities.'
+      message: `Publishing ${selectedRows.size} placements...`,
+      details: 'Syncing changes with Campaign Manager 360.'
     });
 
-    const result = await pushPlacements(Array.from(selectedRows));
+    const result = await publishSelectedDrafts(Array.from(selectedRows));
     
     if (result.success > 0) {
-      const lastItem = result.createdItems[result.createdItems.length - 1];
-      const baseUrl = `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}`;
-      const placementPath = selectedCampaign 
-        ? `/campaigns/${selectedCampaign.id}/explorer/placements/${lastItem.cmId}`
-        : `/advertisers/${selectedAdvertiser?.id}/placements/${lastItem.cmId}`;
-      
-      const verifyLink = `${baseUrl}${placementPath}`;
-      
       setToast({
         show: true,
         type: 'success',
-        message: 'Push Successful!',
-        details: `${result.success} placements registered correctly in Campaign Manager. ${result.failed > 0 ? `${result.failed} failed.` : ''}`,
-        link: verifyLink
+        message: 'Publish Successful!',
+        details: `${result.success} placements synced correctly. ${result.failed > 0 ? `${result.failed} failed.` : ''}`,
       });
     } else {
       setToast({
         show: true,
         type: 'error',
-        message: 'Push Failed',
-        details: result.error || 'None of the selected placements could be registered. Check API permissions.'
+        message: 'Publish Failed',
+        details: result.results.find(r => !r.success)?.error || 'None of the selected placements could be registered.'
       });
     }
     
     setSelectedRows(new Set());
   };
 
-  const filteredPlacements = placements.filter(p => {
+  const filteredPlacements = placements.map(p => placementsDrafts[p.id] || p).filter(p => {
     const matchesCampaign = !selectedCampaign || p.campaignId === selectedCampaign.id;
     const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
     return matchesCampaign && matchesSearch;
@@ -164,7 +170,7 @@ const PlacementGrid: React.FC = () => {
             <div className="flex items-center bg-blue-600/10 px-3 py-1.5 rounded-lg border border-blue-500/20 gap-3 mr-4 animate-in fade-in slide-in-from-right-4">
               <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">{selectedRows.size} selected</span>
               <div className="w-px h-4 bg-blue-500/20" />
-              <button className="text-slate-400 hover:text-white transition-colors" title="Bulk Naming"><Zap className="w-3.5 h-3.5" /></button>
+              <button onClick={() => setIsBulkNamingOpen(true)} className="text-slate-400 hover:text-white transition-colors" title="Bulk Naming"><Zap className="w-3.5 h-3.5" /></button>
               <button className="text-slate-400 hover:text-white transition-colors" title="Duplicate"><Copy className="w-3.5 h-3.5" /></button>
               <button 
                 onClick={() => {
@@ -250,8 +256,36 @@ const PlacementGrid: React.FC = () => {
                     onChange={() => toggleSelectRow(p.id)}
                   />
                 </td>
-                <td className="p-4 font-mono text-[11px] text-slate-300 group-hover:text-blue-400 cursor-pointer transition-colors">
-                  {p.name}
+                <td className="p-4 font-mono text-[11px] text-slate-300 group-hover:text-blue-400 transition-colors">
+                  {editingId === p.id ? (
+                    <div className="flex items-center gap-2">
+                      <input 
+                        autoFocus
+                        className="bg-slate-950 border border-blue-500 rounded px-2 py-1 w-full outline-none"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onBlur={() => {
+                          updatePlacementName(p.id, editValue);
+                          setEditingId(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            updatePlacementName(p.id, editValue);
+                            setEditingId(null);
+                          }
+                          if (e.key === 'Escape') setEditingId(null);
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2" onClick={() => {
+                      setEditingId(p.id);
+                      setEditValue(p.name);
+                    }}>
+                      <span className="truncate max-w-[300px]">{p.name}</span>
+                      <Edit3 className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                  )}
                 </td>
                 <td className="p-4 text-[11px] font-bold text-slate-400 uppercase tracking-tighter">
                   {p.siteId}
@@ -270,8 +304,17 @@ const PlacementGrid: React.FC = () => {
                 </td>
                 <td className="p-4">
                   <div className="flex items-center gap-2">
-                    <div className={`w-1.5 h-1.5 rounded-full ${p.status === 'Active' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-slate-600'}`} />
-                    <span className="text-[10px] font-bold uppercase text-slate-400">{p.status}</span>
+                    {placementsDrafts[p.id] ? (
+                      <>
+                        <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                        <span className="text-[10px] font-bold uppercase text-amber-500">Draft</span>
+                      </>
+                    ) : (
+                      <>
+                        <div className={`w-1.5 h-1.5 rounded-full ${p.status === 'Active' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-slate-600'}`} />
+                        <span className="text-[10px] font-bold uppercase text-slate-400">Synced</span>
+                      </>
+                    )}
                   </div>
                 </td>
                 <td className="p-4 text-[11px] text-slate-500 font-medium">
@@ -342,6 +385,38 @@ const PlacementGrid: React.FC = () => {
       )}
       {isCreatorOpen && (
         <PlacementCreator onClose={() => setIsCreatorOpen(false)} />
+      )}
+
+      {isBulkNamingOpen && (
+        <BulkNamingModal 
+          placements={filteredPlacements.filter(p => selectedRows.has(p.id))}
+          onClose={() => setIsBulkNamingOpen(false)}
+          onApply={(config) => {
+            selectedRows.forEach(id => {
+              const p = filteredPlacements.find(p => p.id === id);
+              if (!p) return;
+              let newName = p.name;
+              if (config.value) {
+                switch (config.mode) {
+                  case 'prefix':
+                    newName = `${config.value}${config.separator}${p.name}`;
+                    break;
+                  case 'suffix':
+                    newName = `${p.name}${config.separator}${config.value}`;
+                    break;
+                  case 'replace':
+                    if (config.replaceFrom) {
+                      newName = p.name.replace(new RegExp(config.replaceFrom, 'g'), config.value);
+                    }
+                    break;
+                }
+              }
+              updatePlacementName(id, newName);
+            });
+            setIsBulkNamingOpen(false);
+            setSelectedRows(new Set());
+          }}
+        />
       )}
 
       {/* Link Creative Modal */}

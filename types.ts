@@ -41,6 +41,8 @@ export interface Placement {
   createdAt: string;
   updatedAt: string;
   externalUrl?: string;
+  isDraft?: boolean;
+  originalData?: Partial<Placement>;
 }
 
 export interface Creative {
@@ -49,6 +51,7 @@ export interface Creative {
   type: string;
   size: string;
   status: Status;
+  active: boolean;
   thumbnailUrl: string;
   placementIds: string[];
   externalUrl?: string;
