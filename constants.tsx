@@ -67,7 +67,19 @@ export const NAMING_TAXONOMY = {
 export const CM360_ERROR_MAPPING: Record<string, { title: string, description: string }> = {
   '100012': {
     title: 'Conflicto de Tipo y Rol',
-    description: 'El tipo de archivo no coincide con la función asignada. Se ha corregido la nomenclatura interna de "HTML" para evitar este conflicto en archivos de imagen y banners.'
+    description: 'El tipo de archivo no coincide con la función asignada. Se ha implementado el mapeo automático a "HTML_IMAGE" para banners estáticos, cumpliendo con la API v4.'
+  },
+  '9085': {
+    title: 'Tipo Depreciado (IMAGE)',
+    description: 'Google ya no permite crear creatividades de tipo "IMAGE". El sistema ahora las convierte automáticamente a tipo "DISPLAY" para cumplir con la API v4.'
+  },
+  '8061': {
+    title: 'Activo no Encontrado',
+    description: 'El archivo se subió pero la API no lo encuentra al crear la creatividad. Se ha sincronizado el tipo de activo a "HTML_IMAGE" para resolver este conflicto.'
+  },
+  '9076': {
+    title: 'Error de Proporción (Aspect Ratio)',
+    description: 'Las dimensiones especificadas no coinciden con el archivo real. El sistema ahora detecta automáticamente el tamaño de la imagen para evitar este error.'
   },
   '100008': {
     title: 'Nombre Duplicado',

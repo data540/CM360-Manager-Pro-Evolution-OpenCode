@@ -44,13 +44,14 @@ interface AppContextType {
   fetchSites: () => Promise<void>;
   createCampaign: (campaign: Partial<Campaign>) => Promise<{success: boolean, id?: string, error?: string}>;
   pushPlacements: (placementIds: string[]) => Promise<{success: number, failed: number, error?: string, createdItems: {id: string, cmId: string, name: string}[]}>;
-  uploadCreative: (file: File, name: string, type: string) => Promise<{success: boolean, id?: string, error?: string}>;
+  uploadCreative: (file: File, name: string, type: string, sizeStr?: string) => Promise<{success: boolean, id?: string, error?: string}>;
+  assignCreativeToPlacement: (creativeId: string, placementId: string, campaignId: string) => Promise<{success: boolean, id?: string, error?: string}>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const DEFAULT_CLIENT_ID = "547547481261-0o6coge0fufp839q33ekv7hk1930m7o1.apps.googleusercontent.com";
-const CM360_SCOPES = "https://www.googleapis.com/auth/dfareporting https://www.googleapis.com/auth/dfatrafficking openid profile email";
+const CM360_SCOPES = "https://www.googleapis.com/auth/dfareporting https://www.googleapis.com/auth/dfatrafficking openid https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email";
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [advertisers, setAdvertisers] = useState<Advertiser[]>([]);
@@ -432,25 +433,32 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return { success: successCount, failed: failedCount, error: lastError, createdItems };
   };
 
-  const uploadCreative = async (file: File, name: string, type: string, sizeStr?: string) => {
+  const uploadCreative = async (file: File, name: string, format: string, sizeStr?: string) => {
     if (!accessToken || !profileId || !selectedAdvertiser) return { success: false, error: 'No connection' };
     try {
       // 1. Detect Asset Type
       let assetType = 'HTML';
-      if (file.type.startsWith('image/')) assetType = 'IMAGE';
-      else if (file.type.startsWith('video/')) assetType = 'VIDEO';
-      else if (file.name.endsWith('.zip')) assetType = 'HTML';
+      if (file.type.startsWith('image/')) {
+        // For DISPLAY creatives in v4, images are often expected as HTML_IMAGE
+        assetType = (format === 'Video') ? 'IMAGE' : 'HTML_IMAGE';
+      } else if (file.type.startsWith('video/')) {
+        assetType = 'VIDEO';
+      } else if (file.name.endsWith('.zip')) {
+        assetType = 'HTML';
+      }
 
-      // 2. Parse Size
+      // 2. Parse Size using Regex for better accuracy
       let width = 300;
       let height = 250;
-      if (sizeStr && sizeStr.toLowerCase().includes('x')) {
-        const parts = sizeStr.toLowerCase().replace('×', 'x').split('x');
-        width = parseInt(parts[0]) || 300;
-        height = parseInt(parts[1]) || 250;
-      } else if (sizeStr === 'In-stream' || sizeStr === 'Interstitial') {
-        width = 0;
-        height = 0;
+      if (sizeStr) {
+        const sizeMatches = sizeStr.match(/(\d+)\s*[x×]\s*(\d+)/i);
+        if (sizeMatches) {
+          width = parseInt(sizeMatches[1]);
+          height = parseInt(sizeMatches[2]);
+        } else if (sizeStr.toLowerCase().includes('in-stream') || sizeStr.toLowerCase().includes('interstitial')) {
+          width = 0;
+          height = 0;
+        }
       }
 
       // 3. Insert Creative Asset
@@ -465,7 +473,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
       formData.append('file', file);
 
-      // Note the /upload/ prefix and the ?uploadType=multipart parameter
       const assetRes = await fetch(`https://dfareporting.googleapis.com/upload/dfareporting/v4/userprofiles/${profileId}/creativeAssets/${selectedAdvertiser.id}/creativeAssets?uploadType=multipart`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -477,20 +484,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return { success: false, error: errorData.error?.message || 'Asset upload failed' };
       }
       const assetData = await assetRes.json();
+      
+      // The API returns the assetIdentifier it created. We MUST use this exact object.
+      const confirmedAssetIdentifier = assetData.assetIdentifier;
 
-      // 4. Insert Creative
-      const isVideoCreative = type === 'Video';
-      let creativeType = isVideoCreative ? 'INSTREAM_VIDEO' : 'DISPLAY';
+      // 4. Determine Creative Type based on Format
+      let creativeType = 'DISPLAY';
+      if (format === 'Video') creativeType = 'INSTREAM_VIDEO';
+      else if (format === 'Rich Media') creativeType = 'RICH_MEDIA_DISPLAY_BANNER';
+      else if (format === 'Tracking') creativeType = 'TRACKING_TEXT';
       
-      // If it's a display format but the asset is an image, CM360 requires the creative type to be 'IMAGE'
-      if (!isVideoCreative && assetType === 'IMAGE') {
-        creativeType = 'IMAGE';
-      }
-      
-      // Determine correct role based on asset type and creative type
+      // 5. Determine correct role and asset type mapping for the creative
       let assetRole = 'PRIMARY';
-      if (isVideoCreative && assetType === 'VIDEO') {
-        assetRole = 'PARENT_VIDEO';
+      let finalAssetType = confirmedAssetIdentifier.type;
+      
+      if (creativeType === 'INSTREAM_VIDEO') {
+        if (confirmedAssetIdentifier.type === 'VIDEO') {
+          assetRole = 'PARENT_VIDEO';
+        } else {
+          assetRole = 'PRIMARY'; 
+        }
+      } else if (creativeType === 'DISPLAY') {
+        assetRole = 'PRIMARY';
       }
 
       const creativeRes = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creatives`, {
@@ -504,9 +519,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           name: name,
           type: creativeType,
           size: { width, height },
+          active: true,
           creativeAssets: [{
-            assetIdentifier: assetData.assetIdentifier,
-            role: assetRole
+            assetIdentifier: {
+              type: finalAssetType,
+              name: confirmedAssetIdentifier.name
+            },
+            role: assetRole,
+            size: { width, height }
           }]
         })
       });
@@ -516,9 +536,55 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         await fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
         return { success: true, id: creativeData.id };
       }
-      return { success: false, error: creativeData.error?.message || 'Creative creation failed' };
+      
+      // Enhanced error reporting to diagnose 100012 / 8061
+      const apiErrorMessage = creativeData.error?.message || 'Creative creation failed';
+      return { 
+        success: false, 
+        error: `${apiErrorMessage} [Type: ${creativeType}, Asset: ${finalAssetType}, Role: ${assetRole}]` 
+      };
     } catch (e: any) {
       console.error("Upload creative error:", e);
+      return { success: false, error: e.message || 'Network error' };
+    }
+  };
+
+  const assignCreativeToPlacement = async (creativeId: string, placementId: string, campaignId: string) => {
+    if (!accessToken || !profileId) return { success: false, error: 'No connection' };
+    try {
+      // 1. Create an Ad
+      // We'll create a standard serving ad that links the creative to the placement
+      const adRes = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/ads`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          campaignId: campaignId,
+          name: `Ad_${creativeId}_${placementId}`,
+          active: true,
+          type: 'AD_SERVING_STANDARD_AD',
+          creativeAssignments: [{
+            creativeId: creativeId,
+            active: true
+          }],
+          placementAssignments: [{
+            placementId: placementId,
+            active: true
+          }],
+          startTime: new Date().toISOString(),
+          endTime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() // 30 days default
+        })
+      });
+
+      const adData = await adRes.json();
+      if (adRes.ok) {
+        return { success: true, id: adData.id };
+      }
+      return { success: false, error: adData.error?.message || 'Ad creation failed' };
+    } catch (e: any) {
+      console.error("Assign creative error:", e);
       return { success: false, error: e.message || 'Network error' };
     }
   };
@@ -571,7 +637,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setSelectedAdvertiser, setSelectedCampaign, setCurrentView,
       addPlacements, updatePlacement, deletePlacement,
       connectionStatus, isAuthenticated, accessToken, profileId, accountId, user, login, loginWithToken, enterDemoMode, logout,
-      fetchAdvertisers, fetchCampaigns, fetchCreatives, fetchSites, createCampaign, pushPlacements, uploadCreative
+      fetchAdvertisers, fetchCampaigns, fetchCreatives, fetchSites, createCampaign, pushPlacements, uploadCreative, assignCreativeToPlacement
     }}>
       {children}
     </AppContext.Provider>

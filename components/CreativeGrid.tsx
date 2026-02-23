@@ -25,7 +25,7 @@ import {
 import Toast from './Toast';
 
 const CreativeGrid: React.FC = () => {
-  const { creatives, selectedAdvertiser, fetchCreatives, connectionStatus, uploadCreative, accountId } = useApp();
+  const { creatives, selectedAdvertiser, selectedCampaign, fetchCreatives, connectionStatus, uploadCreative, accountId } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [loading, setLoading] = useState(false);
@@ -38,11 +38,11 @@ const CreativeGrid: React.FC = () => {
   const [isErrorGuideOpen, setIsErrorGuideOpen] = useState(false);
   
   const CREATIVE_SPECS: Record<string, string[]> = {
-    'Display': ['970x250', '970x90', '728x90', '300x250', '160x600', '300x600', '300x1050'],
-    'Mobile Display': ['320x50', '300x50'],
+    'Display': ['970x250', '970x90', '728x90', '300x250', '160x600', '300x600', '300x1050', '468x60', '250x250', '200x200'],
+    'Mobile Display': ['320x50', '300x50', '320x480', '480x320'],
     'Tracking': ['1x1'],
-    'Rich Media': ['728x90', '300x250', '160x600', 'Interstitial'],
-    'Video': ['In-stream', 'Companion 300x250', 'Companion 728x90', 'Companion 300x60']
+    'Rich Media': ['728x90', '300x250', '160x600', '300x600', 'Interstitial'],
+    'Video': ['In-stream', 'Companion 300x250', 'Companion 728x90', 'Companion 300x60', 'Companion 160x600']
   };
   
   const CREATIVE_FORMATS = Object.keys(CREATIVE_SPECS);
@@ -62,7 +62,19 @@ const CreativeGrid: React.FC = () => {
     
     const initialFormat = file.type.startsWith('video/') ? 'Video' : 'Display';
     setSelectedFormat(initialFormat);
-    setSelectedSize(CREATIVE_SPECS[initialFormat][0]);
+    
+    // Auto-detect image dimensions
+    if (file.type.startsWith('image/')) {
+      const img = new Image();
+      img.onload = () => {
+        const detectedSize = `${img.width}x${img.height}`;
+        setSelectedSize(detectedSize);
+        URL.revokeObjectURL(img.src);
+      };
+      img.src = URL.createObjectURL(file);
+    } else {
+      setSelectedSize(CREATIVE_SPECS[initialFormat][0]);
+    }
     
     setIsUploadModalOpen(true);
     
@@ -73,7 +85,8 @@ const CreativeGrid: React.FC = () => {
   const confirmUpload = async () => {
     if (!pendingFile || !selectedAdvertiser) return;
 
-    const finalName = `${customName}_${selectedFormat}_${selectedSize.replace(/\s+/g, '_')}`;
+    const campaignPrefix = selectedCampaign ? `${selectedCampaign.name.substring(0, 10)}_` : '';
+    const finalName = `${campaignPrefix}${customName}_${selectedFormat}_${selectedSize.replace(/\s+/g, '_')}`;
     setIsUploadModalOpen(false);
 
     setToast({
@@ -83,8 +96,7 @@ const CreativeGrid: React.FC = () => {
       details: `Processing ${finalName} and registering asset.`
     });
 
-    const creativeType = selectedFormat === 'Video' ? 'Video' : 'Display';
-    const result = await uploadCreative(pendingFile, finalName, creativeType, selectedSize);
+    const result = await uploadCreative(pendingFile, finalName, selectedFormat, selectedSize);
     
     if (result.success) {
       const baseUrl = `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}`;
@@ -128,9 +140,14 @@ const CreativeGrid: React.FC = () => {
     }
   };
 
-  const filteredCreatives = creatives.filter(c => 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredCreatives = creatives.filter(c => {
+    const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase());
+    // If a campaign is selected, we might want to filter creatives by campaign, 
+    // but CM360 creatives are advertiser-level. 
+    // However, for UX, we can filter by name if they follow the campaign prefix convention we just added.
+    const matchesCampaign = !selectedCampaign || c.name.toLowerCase().includes(selectedCampaign.name.substring(0, 5).toLowerCase());
+    return matchesSearch && matchesCampaign;
+  });
 
   const getIcon = (type: string) => {
     if (type.includes('HTML5') || type.includes('RICH_MEDIA')) return <FileCode className="w-5 h-5 text-amber-500" />;
@@ -389,18 +406,27 @@ const CreativeGrid: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <h3 className="text-xl font-bold text-white mb-2">Configure Creative</h3>
-            <p className="text-slate-400 text-sm mb-6">Review the name and format before uploading to CM360.</p>
+            <p className="text-slate-400 text-sm mb-6">
+              {selectedCampaign ? `Uploading to Campaign: ${selectedCampaign.name}` : 'Review the name and format before uploading to CM360.'}
+            </p>
             
             <div className="space-y-4">
               <div>
                 <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Base Name</label>
-                <input 
-                  type="text"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
-                  value={customName}
-                  onChange={(e) => setCustomName(e.target.value)}
-                  placeholder="Creative name..."
-                />
+                <div className="flex items-center gap-2">
+                  {selectedCampaign && (
+                    <span className="px-2 py-3 bg-slate-950 border border-slate-800 rounded-xl text-[10px] font-mono text-slate-500">
+                      {selectedCampaign.name.substring(0, 10)}_
+                    </span>
+                  )}
+                  <input 
+                    type="text"
+                    className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    placeholder="Creative name..."
+                  />
+                </div>
               </div>
 
               <div>
@@ -447,7 +473,7 @@ const CreativeGrid: React.FC = () => {
               <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 mt-4">
                 <label className="block text-[9px] uppercase font-bold text-slate-600 mb-1">Final Name Preview</label>
                 <p className="text-xs font-mono text-blue-400 truncate">
-                  {customName}_{selectedFormat}_{selectedSize.replace(/\s+/g, '_')}
+                  {selectedCampaign ? `${selectedCampaign.name.substring(0, 10)}_` : ''}{customName}_{selectedFormat}_{selectedSize.replace(/\s+/g, '_')}
                 </p>
               </div>
               

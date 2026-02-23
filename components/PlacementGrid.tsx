@@ -24,11 +24,14 @@ import {
 import Toast from './Toast';
 
 const PlacementGrid: React.FC = () => {
-  const { placements, selectedCampaign, deletePlacement, pushPlacements, accountId, selectedAdvertiser } = useApp();
+  const { placements, creatives, selectedCampaign, deletePlacement, pushPlacements, accountId, selectedAdvertiser, assignCreativeToPlacement } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [isCreatorOpen, setIsCreatorOpen] = useState(false);
+  const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
+  const [activePlacement, setActivePlacement] = useState<Placement | null>(null);
+  const [creativeSearch, setCreativeSearch] = useState('');
   
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'loading', message: string, details?: string, link?: string}>({
     show: false,
@@ -95,6 +98,37 @@ const PlacementGrid: React.FC = () => {
     if (newSelected.has(id)) newSelected.delete(id);
     else newSelected.add(id);
     setSelectedRows(newSelected);
+  };
+
+  const handleLinkCreative = async (creativeId: string) => {
+    if (!activePlacement || !selectedCampaign) return;
+
+    setIsLinkModalOpen(false);
+    setToast({
+      show: true,
+      type: 'loading',
+      message: 'Linking creative to placement...',
+      details: 'Creating Ad and assignments in CM360.'
+    });
+
+    const result = await assignCreativeToPlacement(creativeId, activePlacement.id, selectedCampaign.id);
+
+    if (result.success) {
+      setToast({
+        show: true,
+        type: 'success',
+        message: 'Creative Linked!',
+        details: 'An Ad has been created and assigned to the placement successfully.'
+      });
+    } else {
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'Linking Failed',
+        details: result.error || 'Could not create the association. Check API permissions.'
+      });
+    }
+    setActivePlacement(null);
   };
 
   const handleExportCSV = () => {
@@ -245,6 +279,18 @@ const PlacementGrid: React.FC = () => {
                 </td>
                 <td className="p-4">
                   <div className="flex items-center gap-2">
+                    {p.status === 'Active' && (
+                      <button 
+                        onClick={() => {
+                          setActivePlacement(p);
+                          setIsLinkModalOpen(true);
+                        }}
+                        className="p-1.5 rounded-md text-emerald-400 hover:bg-emerald-400/10 transition-all"
+                        title="Link Creative"
+                      >
+                        <Zap className="w-4 h-4" />
+                      </button>
+                    )}
                     {p.externalUrl && (
                       <a 
                         href={p.externalUrl} 
@@ -296,6 +342,70 @@ const PlacementGrid: React.FC = () => {
       )}
       {isCreatorOpen && (
         <PlacementCreator onClose={() => setIsCreatorOpen(false)} />
+      )}
+
+      {/* Link Creative Modal */}
+      {isLinkModalOpen && activePlacement && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-2xl shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h3 className="text-xl font-bold text-white">Link Creative to Placement</h3>
+                <p className="text-slate-400 text-sm mt-1">Select a creative to assign to <span className="text-blue-400 font-mono">{activePlacement.name}</span></p>
+              </div>
+              <button onClick={() => setIsLinkModalOpen(false)} className="text-slate-500 hover:text-white transition-colors">
+                <ArrowUpDown className="w-5 h-5 rotate-45" />
+              </button>
+            </div>
+
+            <div className="relative mb-6">
+              <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+              <input 
+                type="text" 
+                placeholder="Search creatives..." 
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+                value={creativeSearch}
+                onChange={(e) => setCreativeSearch(e.target.value)}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
+              {creatives
+                .filter(c => c.name.toLowerCase().includes(creativeSearch.toLowerCase()))
+                .map(creative => (
+                  <button
+                    key={creative.id}
+                    onClick={() => handleLinkCreative(creative.id)}
+                    className="flex items-center gap-4 p-3 bg-slate-950/50 border border-slate-800 rounded-2xl hover:border-blue-500/50 hover:bg-blue-600/5 transition-all text-left group"
+                  >
+                    <div className="w-12 h-12 bg-slate-900 rounded-lg border border-slate-800 overflow-hidden flex items-center justify-center shrink-0">
+                      {creative.thumbnailUrl ? (
+                        <img src={creative.thumbnailUrl} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" />
+                      ) : (
+                        <Layers className="w-5 h-5 text-slate-700" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-bold text-slate-200 truncate group-hover:text-blue-400 transition-colors">{creative.name}</h4>
+                      <div className="flex items-center gap-3 mt-1">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{creative.type}</span>
+                        <span className="text-[10px] font-bold text-slate-600">{creative.size}</span>
+                      </div>
+                    </div>
+                    <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                    </div>
+                  </button>
+                ))}
+              {creatives.length === 0 && (
+                <div className="p-12 text-center">
+                  <AlertCircle className="w-8 h-8 text-slate-700 mx-auto mb-3" />
+                  <p className="text-slate-500 text-sm">No creatives found for this advertiser.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       <Toast 
