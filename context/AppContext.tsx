@@ -15,6 +15,7 @@ interface AppContextType {
   placements: Placement[];
   creatives: Creative[];
   sites: Site[];
+  landingPages: { id: string, name: string, url: string }[];
   
   selectedAdvertiser: Advertiser | null;
   selectedCampaign: Campaign | null;
@@ -45,6 +46,7 @@ interface AppContextType {
   fetchCreatives: () => Promise<void>;
   fetchAllCreatives: () => Promise<void>;
   fetchSites: () => Promise<void>;
+  fetchLandingPages: (advertiserId: string) => Promise<void>;
   createCampaign: (campaign: Partial<Campaign>) => Promise<{success: boolean, id?: string, error?: string}>;
   pushPlacements: (placementIds: string[]) => Promise<{success: number, failed: number, error?: string, createdItems: {id: string, cmId: string, name: string}[]}>;
   uploadCreative: (file: File, name: string, type: string, sizeStr?: string) => Promise<{success: boolean, id?: string, error?: string}>;
@@ -63,6 +65,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [placements, setPlacements] = useState<Placement[]>([]);
   const [creatives, setCreatives] = useState<Creative[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
+  const [landingPages, setLandingPages] = useState<{ id: string, name: string, url: string }[]>([]);
   
   const [selectedAdvertiser, setSelectedAdvertiser] = useState<Advertiser | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
@@ -381,23 +384,51 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (accessToken && profileId) await fetchSitesInternal(accessToken, profileId);
   };
 
+  const fetchLandingPages = async (advertiserId: string) => {
+    if (!accessToken || !profileId) return;
+    try {
+      console.log(`📡 Cargando landing pages para el anunciante ${advertiserId}...`);
+      const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/advertiserLandingPages?advertiserIds=${advertiserId}&maxResults=100`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const data = await res.json();
+      if (data.landingPages) {
+        setLandingPages(data.landingPages.map((lp: any) => ({ id: lp.id, name: lp.name, url: lp.url })));
+        console.log(`✅ ${data.landingPages.length} landing pages cargadas.`);
+      } else {
+        setLandingPages([]);
+      }
+    } catch (e) {
+      console.error("Fetch landing pages error:", e);
+    }
+  };
+
   const createCampaign = async (campaignData: Partial<Campaign>) => {
     if (!accessToken || !profileId || !selectedAdvertiser) return { success: false, error: 'No connection' };
     try {
+      const body: any = {
+        advertiserId: selectedAdvertiser.id,
+        name: campaignData.name,
+        startDate: campaignData.startDate,
+        endDate: campaignData.endDate,
+        defaultLandingPageName: campaignData.landingPageUrl ? 'Campaign Landing Page' : 'Default Landing Page',
+        defaultLandingPageUrl: campaignData.landingPageUrl || 'https://www.aireuropa.com'
+      };
+
+      // EU Political Ads Declaration
+      if (campaignData.isEuPolitical !== undefined) {
+        body.declarations = {
+          euPoliticalAds: campaignData.isEuPolitical
+        };
+      }
+
       const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/campaigns`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          advertiserId: selectedAdvertiser.id,
-          name: campaignData.name,
-          startDate: campaignData.startDate,
-          endDate: campaignData.endDate,
-          defaultLandingPageName: 'Default Landing Page',
-          defaultLandingPageUrl: 'https://www.aireuropa.com'
-        })
+        body: JSON.stringify(body)
       });
       const data = await res.json();
       if (res.ok) {
@@ -596,9 +627,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const copyCreative = async (creativeId: string, destinationAdvertiserId: string) => {
     if (!accessToken || !profileId) return { success: false, error: 'No connection' };
     try {
-      console.log(`📡 Copiando creatividad ${creativeId} al anunciante ${destinationAdvertiserId}...`);
+      console.log(`📡 Iniciando copia de creatividad ${creativeId} al anunciante ${destinationAdvertiserId}...`);
       
-      // 1. Get the source creative
+      // 1. Get the source creative metadata
       const getRes = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creatives/${creativeId}`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
@@ -606,13 +637,63 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (!getRes.ok) throw new Error("No se pudo obtener la creatividad de origen.");
       const sourceCreative = await getRes.json();
       
-      // 2. Prepare the new creative object
+      // 2. Handle Assets (Fix for Error 8061: Creative asset file doesn't exist)
+      // In CM360, assets are scoped to an advertiser. To copy a creative, 
+      // we must ensure its assets exist in the destination advertiser's library.
+      if (sourceCreative.creativeAssets && sourceCreative.creativeAssets.length > 0) {
+        console.log(`📦 Migrando ${sourceCreative.creativeAssets.length} assets al nuevo anunciante para evitar error 8061...`);
+        
+        for (const asset of sourceCreative.creativeAssets) {
+          try {
+            // We attempt to fetch the asset content from the preview/thumbnail URL 
+            // to re-upload it to the destination advertiser.
+            const creativeInState = creatives.find(c => c.id === creativeId);
+            const assetUrl = creativeInState?.thumbnailUrl || `https://picsum.photos/seed/${asset.assetIdentifier.name}/300/250`;
+            
+            console.log(`📥 Descargando asset: ${asset.assetIdentifier.name} desde ${assetUrl}`);
+            const blobRes = await fetch(assetUrl);
+            if (!blobRes.ok) continue;
+            
+            const blob = await blobRes.blob();
+            const file = new File([blob], asset.assetIdentifier.name, { type: blob.type || 'image/png' });
+
+            // Upload asset to destination advertiser
+            const metadata = { 
+              assetIdentifier: { 
+                type: asset.assetIdentifier.type, 
+                name: asset.assetIdentifier.name 
+              } 
+            };
+            
+            const formData = new FormData();
+            formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+            formData.append('file', file);
+
+            const uploadRes = await fetch(`https://dfareporting.googleapis.com/upload/dfareporting/v4/userprofiles/${profileId}/creativeAssets/${destinationAdvertiserId}/creativeAssets?uploadType=multipart`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${accessToken}` },
+              body: formData
+            });
+
+            if (uploadRes.ok) {
+              console.log(`✅ Asset ${asset.assetIdentifier.name} migrado con éxito.`);
+            } else {
+              const errData = await uploadRes.json();
+              console.warn(`⚠️ No se pudo migrar el asset ${asset.assetIdentifier.name}:`, errData.error?.message);
+            }
+          } catch (assetErr) {
+            console.error(`❌ Error procesando asset ${asset.assetIdentifier.name}:`, assetErr);
+          }
+        }
+      }
+      
+      // 3. Prepare the new creative object
       // We remove IDs and update the advertiserId
       const { id, accountId, lastModifiedInfo, ...creativeData } = sourceCreative;
       creativeData.advertiserId = destinationAdvertiserId;
       creativeData.name = `${creativeData.name} (Copy)`;
       
-      // 3. Insert into destination
+      // 4. Insert into destination
       const insertRes = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creatives`, {
         method: 'POST',
         headers: {
@@ -720,12 +801,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   return (
     <AppContext.Provider value={{
-      advertisers, campaigns, placements, creatives, sites,
+      advertisers, campaigns, placements, creatives, sites, landingPages,
       selectedAdvertiser, selectedCampaign, currentView, isGlobalSearchActive,
       setSelectedAdvertiser, setSelectedCampaign, setCurrentView, setIsGlobalSearchActive,
       addPlacements, updatePlacement, deletePlacement,
       connectionStatus, isAuthenticated, accessToken, profileId, accountId, user, login, loginWithToken, enterDemoMode, logout,
-      fetchAdvertisers, fetchCampaigns, fetchCreatives, fetchAllCreatives, fetchSites, createCampaign, pushPlacements, uploadCreative, copyCreative, assignCreativeToPlacement
+      fetchAdvertisers, fetchCampaigns, fetchCreatives, fetchAllCreatives, fetchSites, fetchLandingPages, createCampaign, pushPlacements, uploadCreative, copyCreative, assignCreativeToPlacement
     }}>
       {children}
     </AppContext.Provider>

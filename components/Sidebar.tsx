@@ -31,12 +31,19 @@ const Sidebar: React.FC = () => {
     fetchAdvertisers,
     isAuthenticated,
     fetchCampaigns,
+    fetchLandingPages,
+    landingPages,
     createCampaign,
     accountId
   } = useApp();
 
   const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
   const [newCampaignName, setNewCampaignName] = useState('');
+  const [isEuPolitical, setIsEuPolitical] = useState(false);
+  const [selectedLandingPageUrl, setSelectedLandingPageUrl] = useState('');
+  const [customLandingPageUrl, setCustomLandingPageUrl] = useState('');
+  const [isCustomLandingPage, setIsCustomLandingPage] = useState(false);
+
   const [advertiserSearch, setAdvertiserSearch] = useState('');
   const [campaignSearch, setCampaignSearch] = useState('');
   
@@ -59,7 +66,9 @@ const Sidebar: React.FC = () => {
     const result = await createCampaign({
       name: newCampaignName,
       startDate: new Date().toISOString().split('T')[0],
-      endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      isEuPolitical,
+      landingPageUrl: isCustomLandingPage ? customLandingPageUrl : selectedLandingPageUrl
     });
     
     if (result.success) {
@@ -158,7 +167,10 @@ const Sidebar: React.FC = () => {
               {selectedAdvertiser && connectionStatus === 'Connected' && (
                 <>
                   <button 
-                    onClick={() => setIsCampaignModalOpen(true)}
+                    onClick={() => {
+                      setIsCampaignModalOpen(true);
+                      if (selectedAdvertiser) fetchLandingPages(selectedAdvertiser.id);
+                    }}
                     className="text-[9px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
                     title="Nueva campaña"
                   >
@@ -244,11 +256,11 @@ const Sidebar: React.FC = () => {
       {/* Campaign Creation Modal */}
       {isCampaignModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-lg shadow-2xl animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar">
             <h3 className="text-xl font-bold text-white mb-2">Create New Campaign</h3>
-            <p className="text-slate-400 text-sm mb-6">Enter a name for the new campaign in {selectedAdvertiser?.name}.</p>
+            <p className="text-slate-400 text-sm mb-6">Enter details for the new campaign in {selectedAdvertiser?.name}.</p>
             
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div>
                 <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Campaign Name</label>
                 <input 
@@ -260,6 +272,87 @@ const Sidebar: React.FC = () => {
                   autoFocus
                 />
               </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Declarations</label>
+                <p className="text-[11px] text-slate-400 mb-3">EU political ads (required)</p>
+                <div className="space-y-3">
+                  <label className="flex items-start gap-3 cursor-pointer group">
+                    <div className="pt-0.5">
+                      <input 
+                        type="radio" 
+                        name="euPolitical" 
+                        className="hidden" 
+                        checked={isEuPolitical === true}
+                        onChange={() => setIsEuPolitical(true)}
+                      />
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${isEuPolitical === true ? 'border-blue-500 bg-blue-500/20' : 'border-slate-700 bg-slate-950'}`}>
+                        {isEuPolitical === true && <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-200 font-medium group-hover:text-white transition-colors">Yes, this campaign has EU political ads</span>
+                      <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                        Campaign Manager 360 doesn't allow campaigns with EU political ads to serve in the EU. This campaign can still serve in other regions.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-3 cursor-pointer group">
+                    <div className="pt-0.5">
+                      <input 
+                        type="radio" 
+                        name="euPolitical" 
+                        className="hidden" 
+                        checked={isEuPolitical === false}
+                        onChange={() => setIsEuPolitical(false)}
+                      />
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${isEuPolitical === false ? 'border-blue-500 bg-blue-500/20' : 'border-slate-700 bg-slate-950'}`}>
+                        {isEuPolitical === false && <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-200 font-medium group-hover:text-white transition-colors">No, this campaign doesn't have EU political ads</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block text-[10px] uppercase font-bold text-slate-500">Landing Page</label>
+                  <button 
+                    onClick={() => setIsCustomLandingPage(!isCustomLandingPage)}
+                    className="text-[10px] text-blue-400 hover:text-blue-300 font-bold"
+                  >
+                    {isCustomLandingPage ? 'Select from list' : 'Enter manually'}
+                  </button>
+                </div>
+
+                {isCustomLandingPage ? (
+                  <input 
+                    type="url"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+                    placeholder="https://example.com"
+                    value={customLandingPageUrl}
+                    onChange={(e) => setCustomLandingPageUrl(e.target.value)}
+                  />
+                ) : (
+                  <div className="relative">
+                    <select 
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all appearance-none"
+                      value={selectedLandingPageUrl}
+                      onChange={(e) => setSelectedLandingPageUrl(e.target.value)}
+                    >
+                      <option value="">{landingPages.length > 0 ? 'Select a landing page...' : 'No landing pages found'}</option>
+                      {landingPages.map(lp => (
+                        <option key={lp.id} value={lp.url}>{lp.name} ({lp.url})</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-4 top-3.5 w-4 h-4 text-slate-500 pointer-events-none" />
+                  </div>
+                )}
+              </div>
               
               <div className="flex gap-3 pt-4">
                 <button 
@@ -270,7 +363,7 @@ const Sidebar: React.FC = () => {
                 </button>
                 <button 
                   onClick={handleCreateCampaign}
-                  disabled={!newCampaignName || toast.type === 'loading' && toast.show}
+                  disabled={!newCampaignName || (isCustomLandingPage ? !customLandingPageUrl : !selectedLandingPageUrl) || (toast.type === 'loading' && toast.show)}
                   className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20 disabled:opacity-50"
                 >
                   {toast.type === 'loading' && toast.show ? <RefreshCw className="w-4 h-4 animate-spin mx-auto" /> : 'Create Campaign'}

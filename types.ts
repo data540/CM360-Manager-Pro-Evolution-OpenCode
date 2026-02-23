@@ -16,6 +16,8 @@ export interface Campaign {
   budget: number;
   objective: string;
   updatedAt: string;
+  isEuPolitical?: boolean;
+  landingPageUrl?: string;
 }
 
 export interface Site {
