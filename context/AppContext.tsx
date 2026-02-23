@@ -19,10 +19,12 @@ interface AppContextType {
   selectedAdvertiser: Advertiser | null;
   selectedCampaign: Campaign | null;
   currentView: ViewType;
+  isGlobalSearchActive: boolean;
   
   setSelectedAdvertiser: (adv: Advertiser | null) => void;
   setSelectedCampaign: (camp: Campaign | null) => void;
   setCurrentView: (view: ViewType) => void;
+  setIsGlobalSearchActive: (active: boolean) => void;
   
   addPlacements: (newPlacements: Placement[]) => void;
   updatePlacement: (placement: Placement) => void;
@@ -41,10 +43,12 @@ interface AppContextType {
   fetchAdvertisers: () => Promise<void>;
   fetchCampaigns: (advertiserId: string) => Promise<void>;
   fetchCreatives: () => Promise<void>;
+  fetchAllCreatives: () => Promise<void>;
   fetchSites: () => Promise<void>;
   createCampaign: (campaign: Partial<Campaign>) => Promise<{success: boolean, id?: string, error?: string}>;
   pushPlacements: (placementIds: string[]) => Promise<{success: number, failed: number, error?: string, createdItems: {id: string, cmId: string, name: string}[]}>;
   uploadCreative: (file: File, name: string, type: string, sizeStr?: string) => Promise<{success: boolean, id?: string, error?: string}>;
+  copyCreative: (creativeId: string, destinationAdvertiserId: string) => Promise<{success: boolean, id?: string, error?: string}>;
   assignCreativeToPlacement: (creativeId: string, placementId: string, campaignId: string) => Promise<{success: boolean, id?: string, error?: string}>;
 }
 
@@ -63,6 +67,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [selectedAdvertiser, setSelectedAdvertiser] = useState<Advertiser | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [currentView, setCurrentView] = useState<ViewType>('Placements');
+  const [isGlobalSearchActive, setIsGlobalSearchActive] = useState<boolean>(false);
   const [connectionStatus, setConnectionStatus] = useState<'Connected' | 'Disconnected' | 'Connecting'>('Disconnected');
   
   const [accessToken, setAccessToken] = useState<string | null>(localStorage.getItem('cm360_token'));
@@ -317,6 +322,45 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const fetchAllCreatives = async () => {
+    if (!accessToken || !profileId || advertisers.length === 0) return;
+    try {
+      console.log("📡 Cargando creatividades de TODOS los anunciantes (limitado a los 5 primeros)...");
+      const allCreatives: Creative[] = [];
+      const limit = Math.min(advertisers.length, 5);
+      
+      for (let i = 0; i < limit; i++) {
+        const adv = advertisers[i];
+        const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creatives?advertiserId=${adv.id}&maxResults=20&archived=false`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        const data = await res.json();
+        if (data.creatives) {
+          const mapped = data.creatives.map((c: any) => {
+            const sizeStr = c.size ? `${c.size.width}x${c.size.height}` : '300x250';
+            const [width, height] = sizeStr.includes('x') ? sizeStr.split('x').map(Number) : [300, 250];
+            const simulatedThumb = `https://picsum.photos/seed/${c.id}/${width || 300}/${height || 250}`;
+            return {
+              id: c.id,
+              name: `[${adv.name}] ${c.name}`,
+              type: c.type,
+              size: sizeStr,
+              status: 'Active',
+              thumbnailUrl: simulatedThumb,
+              placementIds: [],
+              externalUrl: `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}/advertisers/${adv.id}/creatives/${c.id}`
+            };
+          });
+          allCreatives.push(...mapped);
+        }
+      }
+      setCreatives(allCreatives);
+      console.log(`✅ ${allCreatives.length} creatividades cargadas globalmente.`);
+    } catch (e) {
+      console.error("Fetch all creatives error:", e);
+    }
+  };
+
   const fetchSitesInternal = async (token: string, pid: string) => {
     try {
       console.log("📡 Cargando sitios...");
@@ -549,6 +593,50 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const copyCreative = async (creativeId: string, destinationAdvertiserId: string) => {
+    if (!accessToken || !profileId) return { success: false, error: 'No connection' };
+    try {
+      console.log(`📡 Copiando creatividad ${creativeId} al anunciante ${destinationAdvertiserId}...`);
+      
+      // 1. Get the source creative
+      const getRes = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creatives/${creativeId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      
+      if (!getRes.ok) throw new Error("No se pudo obtener la creatividad de origen.");
+      const sourceCreative = await getRes.json();
+      
+      // 2. Prepare the new creative object
+      // We remove IDs and update the advertiserId
+      const { id, accountId, lastModifiedInfo, ...creativeData } = sourceCreative;
+      creativeData.advertiserId = destinationAdvertiserId;
+      creativeData.name = `${creativeData.name} (Copy)`;
+      
+      // 3. Insert into destination
+      const insertRes = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creatives`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(creativeData)
+      });
+      
+      const data = await insertRes.json();
+      if (insertRes.ok) {
+        // If the destination is the currently selected advertiser, refresh the list
+        if (selectedAdvertiser?.id === destinationAdvertiserId) {
+          await fetchCreativesInternal(accessToken, profileId, destinationAdvertiserId);
+        }
+        return { success: true, id: data.id };
+      }
+      return { success: false, error: data.error?.message || 'Error al copiar la creatividad' };
+    } catch (e: any) {
+      console.error("Copy creative error:", e);
+      return { success: false, error: e.message || 'Network error' };
+    }
+  };
+
   const assignCreativeToPlacement = async (creativeId: string, placementId: string, campaignId: string) => {
     if (!accessToken || !profileId) return { success: false, error: 'No connection' };
     try {
@@ -633,11 +721,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   return (
     <AppContext.Provider value={{
       advertisers, campaigns, placements, creatives, sites,
-      selectedAdvertiser, selectedCampaign, currentView,
-      setSelectedAdvertiser, setSelectedCampaign, setCurrentView,
+      selectedAdvertiser, selectedCampaign, currentView, isGlobalSearchActive,
+      setSelectedAdvertiser, setSelectedCampaign, setCurrentView, setIsGlobalSearchActive,
       addPlacements, updatePlacement, deletePlacement,
       connectionStatus, isAuthenticated, accessToken, profileId, accountId, user, login, loginWithToken, enterDemoMode, logout,
-      fetchAdvertisers, fetchCampaigns, fetchCreatives, fetchSites, createCampaign, pushPlacements, uploadCreative, assignCreativeToPlacement
+      fetchAdvertisers, fetchCampaigns, fetchCreatives, fetchAllCreatives, fetchSites, createCampaign, pushPlacements, uploadCreative, copyCreative, assignCreativeToPlacement
     }}>
       {children}
     </AppContext.Provider>
