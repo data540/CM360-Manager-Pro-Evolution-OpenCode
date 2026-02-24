@@ -4,9 +4,10 @@ import { AppProvider, useApp } from './context/AppContext';
 import Sidebar from './components/Sidebar';
 import PlacementGrid from './components/PlacementGrid';
 import CreativeGrid from './components/CreativeGrid';
+import CampaignGrid from './components/CampaignGrid';
 import AIHelper from './components/AIHelper';
 import Login from './components/Login';
-import { ChevronRight, Settings, LogOut, ExternalLink } from 'lucide-react';
+import { ChevronRight, LogOut } from 'lucide-react';
 
 const Header: React.FC = () => {
   const { selectedAdvertiser, selectedCampaign, currentView, user, logout, profileId } = useApp();
@@ -73,20 +74,7 @@ const MainContent: React.FC = () => {
       case 'AIHelper':
         return <AIHelper />;
       case 'Campaigns':
-        return (
-          <div className="flex-1 flex items-center justify-center bg-slate-950/20">
-            <div className="text-center p-12 glass border-slate-800/50 rounded-[2rem] max-w-md">
-              <div className="w-16 h-16 bg-blue-600/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                <ExternalLink className="w-8 h-8 text-blue-500" />
-              </div>
-              <h1 className="text-2xl font-bold mb-3 text-white">Campaign Explorer</h1>
-              <p className="text-slate-500 text-sm leading-relaxed mb-8">Campaign performance and traffic data is pulled directly from the CM360 Trafficking API for the selected profile.</p>
-              <button className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-500/20">
-                Refresh Live Feed
-              </button>
-            </div>
-          </div>
-        );
+        return <CampaignGrid />;
       case 'Creatives':
         return <CreativeGrid />;
       default:

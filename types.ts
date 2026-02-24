@@ -18,6 +18,8 @@ export interface Campaign {
   updatedAt: string;
   isEuPolitical?: boolean;
   landingPageUrl?: string;
+  isDraft?: boolean;
+  originalData?: Partial<Campaign>;
 }
 
 export interface Site {

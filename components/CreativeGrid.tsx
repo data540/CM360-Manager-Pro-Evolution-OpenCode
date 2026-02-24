@@ -52,6 +52,11 @@ const CreativeGrid: React.FC = () => {
   const [selectedCreatives, setSelectedCreatives] = useState<string[]>([]);
   const [isSelectAll, setIsSelectAll] = useState(false);
   
+  // Naming Convention States
+  const [namingMode, setNamingMode] = useState<'prefix' | 'suffix'>('suffix');
+  const [namingText, setNamingText] = useState('');
+  const [includeDate, setIncludeDate] = useState(true);
+  
   // Assign to Advertiser States
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [creativeToAssign, setCreativeToAssign] = useState<Creative | null>(null);
@@ -129,6 +134,7 @@ const CreativeGrid: React.FC = () => {
 
     setIsUploadModalOpen(false);
     const campaignPrefix = selectedCampaign ? `${selectedCampaign.name.substring(0, 10)}_` : '';
+    const dateStr = includeDate ? `_${new Date().toLocaleDateString('es-ES').replace(/\//g, '-')}` : '';
 
     if (pendingFiles.length > 0) {
       // Batch Upload Logic
@@ -139,7 +145,17 @@ const CreativeGrid: React.FC = () => {
 
       for (let i = 0; i < pendingFiles.length; i++) {
         const file = pendingFiles[i];
-        const currentName = `${campaignPrefix}${file.name.split('.')[0]}_${selectedFormat}_${selectedSize.replace(/\s+/g, '_')}`;
+        const baseName = file.name.split('.')[0];
+        let currentName = '';
+
+        if (namingMode === 'prefix') {
+          currentName = `${namingText}_${baseName}${dateStr}`;
+        } else {
+          currentName = `${baseName}_${namingText}${dateStr}`;
+        }
+
+        // Add format and size suffix for clarity
+        currentName = `${campaignPrefix}${currentName}_${selectedFormat}_${selectedSize.replace(/\s+/g, '_')}`;
         
         setBatchProgress({ 
           current: i + 1, 
@@ -340,6 +356,18 @@ const CreativeGrid: React.FC = () => {
             title="Guía de errores"
           >
             <HelpCircle className="w-4 h-4" />
+          </button>
+
+          <button 
+            onClick={() => {
+              const input = document.getElementById('batch-upload-input');
+              input?.click();
+            }}
+            disabled={!selectedAdvertiser}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:grayscale"
+          >
+            <UploadCloud className="w-4 h-4" />
+            Bulk Create
           </button>
 
           <div className="relative">
@@ -669,6 +697,51 @@ const CreativeGrid: React.FC = () => {
             </p>
             
             <div className="space-y-4">
+              {pendingFiles.length > 0 && (
+                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] uppercase font-bold text-slate-500">Naming Convention</label>
+                    <div className="flex bg-slate-900 rounded-lg p-0.5 border border-slate-800">
+                      <button 
+                        onClick={() => setNamingMode('prefix')}
+                        className={`px-3 py-1 text-[9px] font-bold rounded-md transition-all ${namingMode === 'prefix' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}
+                      >
+                        Prefix
+                      </button>
+                      <button 
+                        onClick={() => setNamingMode('suffix')}
+                        className={`px-3 py-1 text-[9px] font-bold rounded-md transition-all ${namingMode === 'suffix' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}
+                      >
+                        Suffix
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <input 
+                      type="text"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-blue-500 transition-all"
+                      value={namingText}
+                      onChange={(e) => setNamingText(e.target.value)}
+                      placeholder={namingMode === 'prefix' ? "Prefix text..." : "Suffix text..."}
+                    />
+                    
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <div className={`w-8 h-4 rounded-full transition-all relative ${includeDate ? 'bg-blue-600' : 'bg-slate-800'}`}>
+                        <div className={`absolute top-1 w-2 h-2 bg-white rounded-full transition-all ${includeDate ? 'left-5' : 'left-1'}`} />
+                      </div>
+                      <input 
+                        type="checkbox" 
+                        className="hidden" 
+                        checked={includeDate} 
+                        onChange={() => setIncludeDate(!includeDate)} 
+                      />
+                      <span className="text-[10px] font-bold text-slate-400 group-hover:text-slate-300 transition-colors">Append current date (DD-MM-YYYY)</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
               {pendingFiles.length === 0 && (
                 <div>
                   <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Base Name</label>

@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Placement } from '../types';
+import { Placement, Status } from '../types';
 import BulkNamingModal, { BulkNamingConfig } from './BulkNamingModal';
 import PlacementCreator from './PlacementCreator';
 import { 
@@ -33,19 +33,22 @@ const PlacementGrid: React.FC = () => {
     pushPlacements, 
     publishSelectedDrafts,
     updatePlacementName,
+    updatePlacementDraft,
     accountId, 
     selectedAdvertiser, 
     assignCreativeToPlacement 
   } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
-  const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [isCreatorOpen, setIsCreatorOpen] = useState(false);
   const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
   const [activePlacement, setActivePlacement] = useState<Placement | null>(null);
   const [creativeSearch, setCreativeSearch] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingField, setEditingField] = useState<'name' | 'dates' | 'status' | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [editStartDate, setEditStartDate] = useState('');
+  const [editEndDate, setEditEndDate] = useState('');
   const [isBulkNamingOpen, setIsBulkNamingOpen] = useState(false);
   
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'loading', message: string, details?: string, link?: string}>({
@@ -206,14 +209,6 @@ const PlacementGrid: React.FC = () => {
             <PlusCircle className="w-4 h-4" />
             New Placement
           </button>
-          <button 
-            onClick={() => setIsWizardOpen(true)}
-            disabled={!selectedCampaign}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:grayscale"
-          >
-            <Plus className="w-4 h-4" />
-            Bulk Create
-          </button>
         </div>
       </div>
 
@@ -257,7 +252,7 @@ const PlacementGrid: React.FC = () => {
                   />
                 </td>
                 <td className="p-4 font-mono text-[11px] text-slate-300 group-hover:text-blue-400 transition-colors">
-                  {editingId === p.id ? (
+                  {editingId === p.id && editingField === 'name' ? (
                     <div className="flex items-center gap-2">
                       <input 
                         autoFocus
@@ -267,19 +262,25 @@ const PlacementGrid: React.FC = () => {
                         onBlur={() => {
                           updatePlacementName(p.id, editValue);
                           setEditingId(null);
+                          setEditingField(null);
                         }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             updatePlacementName(p.id, editValue);
                             setEditingId(null);
+                            setEditingField(null);
                           }
-                          if (e.key === 'Escape') setEditingId(null);
+                          if (e.key === 'Escape') {
+                            setEditingId(null);
+                            setEditingField(null);
+                          }
                         }}
                       />
                     </div>
                   ) : (
                     <div className="flex items-center gap-2" onClick={() => {
                       setEditingId(p.id);
+                      setEditingField('name');
                       setEditValue(p.name);
                     }}>
                       <span className="truncate max-w-[300px]">{p.name}</span>
@@ -304,21 +305,91 @@ const PlacementGrid: React.FC = () => {
                 </td>
                 <td className="p-4">
                   <div className="flex items-center gap-2">
-                    {placementsDrafts[p.id] ? (
-                      <>
-                        <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                        <span className="text-[10px] font-bold uppercase text-amber-500">Draft</span>
-                      </>
+                    {editingId === p.id && editingField === 'status' ? (
+                      <select
+                        autoFocus
+                        className="bg-slate-950 border border-blue-500 rounded text-[10px] font-bold uppercase py-0.5 outline-none"
+                        value={p.status}
+                        onChange={(e) => {
+                          updatePlacementDraft(p.id, { status: e.target.value as Status });
+                          setEditingId(null);
+                          setEditingField(null);
+                        }}
+                        onBlur={() => {
+                          setEditingId(null);
+                          setEditingField(null);
+                        }}
+                      >
+                        <option value="Active">Active</option>
+                        <option value="Paused">Paused</option>
+                        <option value="Draft">Draft</option>
+                        <option value="Completed">Completed</option>
+                      </select>
                     ) : (
-                      <>
-                        <div className={`w-1.5 h-1.5 rounded-full ${p.status === 'Active' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-slate-600'}`} />
-                        <span className="text-[10px] font-bold uppercase text-slate-400">Synced</span>
-                      </>
+                      <div 
+                        className="flex items-center gap-2 cursor-pointer group/status"
+                        onClick={() => {
+                          setEditingId(p.id);
+                          setEditingField('status');
+                        }}
+                      >
+                        {placementsDrafts[p.id] && placementsDrafts[p.id].isDraft ? (
+                          <>
+                            <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                            <span className="text-[10px] font-bold uppercase text-amber-500">Draft ({p.status})</span>
+                          </>
+                        ) : (
+                          <>
+                            <div className={`w-1.5 h-1.5 rounded-full ${p.status === 'Active' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-slate-600'}`} />
+                            <span className="text-[10px] font-bold uppercase text-slate-400">{p.status}</span>
+                          </>
+                        )}
+                        <Edit3 className="w-2.5 h-2.5 opacity-0 group-hover/status:opacity-100 transition-opacity text-slate-500" />
+                      </div>
                     )}
                   </div>
                 </td>
                 <td className="p-4 text-[11px] text-slate-500 font-medium">
-                  {p.startDate} <span className="mx-1 text-slate-800">—</span> {p.endDate}
+                  {editingId === p.id && editingField === 'dates' ? (
+                    <div className="flex items-center gap-1">
+                      <input 
+                        type="date"
+                        className="bg-slate-950 border border-blue-500 rounded px-1 py-0.5 text-[10px] outline-none text-slate-300"
+                        value={editStartDate}
+                        onChange={(e) => setEditStartDate(e.target.value)}
+                      />
+                      <span className="text-slate-800">—</span>
+                      <input 
+                        type="date"
+                        className="bg-slate-950 border border-blue-500 rounded px-1 py-0.5 text-[10px] outline-none text-slate-300"
+                        value={editEndDate}
+                        onChange={(e) => setEditEndDate(e.target.value)}
+                      />
+                      <button 
+                        onClick={() => {
+                          updatePlacementDraft(p.id, { startDate: editStartDate, endDate: editEndDate });
+                          setEditingId(null);
+                          setEditingField(null);
+                        }}
+                        className="p-1 bg-blue-600 rounded text-white hover:bg-blue-500"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div 
+                      className="flex items-center gap-2 cursor-pointer group/dates"
+                      onClick={() => {
+                        setEditingId(p.id);
+                        setEditingField('dates');
+                        setEditStartDate(p.startDate);
+                        setEditEndDate(p.endDate);
+                      }}
+                    >
+                      <span>{p.startDate} <span className="mx-1 text-slate-800">—</span> {p.endDate}</span>
+                      <Edit3 className="w-3 h-3 opacity-0 group-hover/dates:opacity-100 transition-opacity text-slate-500" />
+                    </div>
+                  )}
                 </td>
                 <td className="p-4">
                   <div className="flex items-center gap-2">
@@ -367,10 +438,10 @@ const PlacementGrid: React.FC = () => {
                     </div>
                   ) : (
                     <button 
-                      onClick={() => setIsWizardOpen(true)}
+                      onClick={() => setIsCreatorOpen(true)}
                       className="mt-6 text-blue-500 hover:text-blue-400 text-xs font-bold uppercase tracking-widest flex items-center gap-2 mx-auto"
                     >
-                      <Plus className="w-4 h-4" /> Create first batch
+                      <Plus className="w-4 h-4" /> Create first placement
                     </button>
                   )}
                 </td>
@@ -380,9 +451,6 @@ const PlacementGrid: React.FC = () => {
         </table>
       </div>
 
-      {isWizardOpen && (
-        <BulkCreateWizard onClose={() => setIsWizardOpen(false)} />
-      )}
       {isCreatorOpen && (
         <PlacementCreator onClose={() => setIsCreatorOpen(false)} />
       )}

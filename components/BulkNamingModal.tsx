@@ -18,8 +18,9 @@ export interface BulkNamingConfig {
 const BulkNamingModal: React.FC<BulkNamingModalProps> = ({ placements, onClose, onApply }) => {
   const [config, setConfig] = useState<BulkNamingConfig>({ mode: 'suffix', value: '', separator: '_' });
 
-  const previewPlacements = useMemo(() => {
-    return placements.slice(0, 20).map(p => {
+  const { previewPlacements, changedCount } = useMemo(() => {
+    let changed = 0;
+    const allPreviews = placements.map(p => {
       let newName = p.name;
       if (config.value) {
         switch (config.mode) {
@@ -36,8 +37,13 @@ const BulkNamingModal: React.FC<BulkNamingModalProps> = ({ placements, onClose, 
             break;
         }
       }
+      if (newName !== p.name) changed++;
       return { ...p, newName };
     });
+    return { 
+      previewPlacements: allPreviews.slice(0, 20), 
+      changedCount: changed 
+    };
   }, [placements, config]);
 
   return (
@@ -46,7 +52,10 @@ const BulkNamingModal: React.FC<BulkNamingModalProps> = ({ placements, onClose, 
         <div className="flex justify-between items-start mb-6">
           <div>
             <h3 className="text-xl font-bold text-white">Bulk Naming Tool</h3>
-            <p className="text-slate-400 text-sm mt-1">Applying changes to {placements.length} selected placements.</p>
+            <div className="flex items-center gap-4 mt-1">
+              <p className="text-slate-400 text-sm">Selected: <span className="text-white font-bold">{placements.length}</span></p>
+              <p className="text-slate-400 text-sm">To be changed: <span className="text-blue-400 font-bold">{changedCount}</span></p>
+            </div>
           </div>
           <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
             <X className="w-5 h-5" />
@@ -106,9 +115,15 @@ const BulkNamingModal: React.FC<BulkNamingModalProps> = ({ placements, onClose, 
             </thead>
             <tbody>
               {previewPlacements.map(p => (
-                <tr key={p.id}>
+                <tr key={p.id} className={p.name === p.newName ? 'opacity-40' : ''}>
                   <td className="p-2 font-mono text-xs text-slate-500 truncate max-w-xs">{p.name}</td>
-                  <td className="p-2 text-center text-blue-500"><ChevronsRight className="w-4 h-4 mx-auto" /></td>
+                  <td className="p-2 text-center text-blue-500">
+                    {p.name === p.newName ? (
+                      <span className="text-[10px] text-slate-600 font-bold">NO CHANGE</span>
+                    ) : (
+                      <ChevronsRight className="w-4 h-4 mx-auto" />
+                    )}
+                  </td>
                   <td className="p-2 font-mono text-xs text-blue-400 truncate max-w-xs">{p.newName}</td>
                 </tr>
               ))}

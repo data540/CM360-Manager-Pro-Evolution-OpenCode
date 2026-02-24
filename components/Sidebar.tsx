@@ -30,7 +30,6 @@ const Sidebar: React.FC = () => {
     setSelectedCampaign,
     fetchAdvertisers,
     isAuthenticated,
-    fetchCampaigns,
     fetchLandingPages,
     landingPages,
     createCampaign,
@@ -47,6 +46,15 @@ const Sidebar: React.FC = () => {
   const [advertiserSearch, setAdvertiserSearch] = useState('');
   const [campaignSearch, setCampaignSearch] = useState('');
   
+  React.useEffect(() => {
+    const handleOpenModal = () => {
+      setIsCampaignModalOpen(true);
+      if (selectedAdvertiser) fetchLandingPages(selectedAdvertiser.id);
+    };
+    window.addEventListener('open-campaign-modal', handleOpenModal);
+    return () => window.removeEventListener('open-campaign-modal', handleOpenModal);
+  }, [selectedAdvertiser, fetchLandingPages]);
+
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'loading', message: string, details?: string, link?: string}>({
     show: false,
     type: 'loading',
@@ -150,6 +158,7 @@ const Sidebar: React.FC = () => {
                   const adv = advertisers.find(a => a.id === e.target.value);
                   setSelectedAdvertiser(adv || null);
                   setSelectedCampaign(null);
+                  if (adv) setCurrentView('Campaigns');
                 }}
               >
                 <option value="">{advertisers.length > 0 ? 'Select Advertiser' : 'No advertisers found'}</option>
@@ -165,25 +174,16 @@ const Sidebar: React.FC = () => {
             <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Active Campaign</label>
             <div className="flex gap-2">
               {selectedAdvertiser && connectionStatus === 'Connected' && (
-                <>
-                  <button 
-                    onClick={() => {
-                      setIsCampaignModalOpen(true);
-                      if (selectedAdvertiser) fetchLandingPages(selectedAdvertiser.id);
-                    }}
-                    className="text-[9px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
-                    title="Nueva campaña"
-                  >
-                    <Plus className="w-2.5 h-2.5" /> NEW
-                  </button>
-                  <button 
-                    onClick={() => fetchCampaigns(selectedAdvertiser.id)}
-                    className="text-[9px] text-blue-400 hover:text-blue-300 flex items-center gap-1"
-                    title="Actualizar campañas"
-                  >
-                    <RefreshCw className="w-2.5 h-2.5" /> REFRESH
-                  </button>
-                </>
+                <button 
+                  onClick={() => {
+                    setIsCampaignModalOpen(true);
+                    if (selectedAdvertiser) fetchLandingPages(selectedAdvertiser.id);
+                  }}
+                  className="text-[9px] text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                  title="Crear campaña"
+                >
+                  <Plus className="w-2.5 h-2.5" /> CREATE
+                </button>
               )}
             </div>
           </div>
@@ -204,6 +204,7 @@ const Sidebar: React.FC = () => {
                 onChange={(e) => {
                   const camp = campaigns.find(c => c.id === e.target.value);
                   setSelectedCampaign(camp || null);
+                  if (camp) setCurrentView('Placements');
                 }}
               >
                 <option value="">{selectedAdvertiser ? 'Select Campaign' : 'Select Advertiser first'}</option>

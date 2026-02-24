@@ -58,8 +58,19 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
 
   const namePrefix = useMemo(() => {
     const { brand, iso, site, campaña, canal, funnel, tech, device, format } = naming;
-    return `${brand}-${iso}_${site}_${campaña}_${canal}_${funnel}_${tech}_${device}_${format}`;
-  }, [naming]);
+    const parts = [];
+    if (enabledFields.brand) parts.push(brand);
+    if (enabledFields.iso) parts.push(iso);
+    if (enabledFields.site) parts.push(site);
+    if (enabledFields.campaña) parts.push(campaña);
+    if (enabledFields.canal) parts.push(canal);
+    if (enabledFields.funnel) parts.push(funnel);
+    if (enabledFields.tech) parts.push(tech);
+    if (enabledFields.device) parts.push(device);
+    if (enabledFields.format) parts.push(format);
+    
+    return parts.join('_');
+  }, [naming, enabledFields]);
 
   const toggleSize = (size: string) => {
     setSelectedSizes(prev => 
@@ -123,95 +134,47 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
               </h3>
               
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-slate-950/50 p-6 rounded-2xl border border-slate-800">
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Brand</label>
-                  <input 
-                    type="text"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-blue-400 focus:outline-none focus:border-blue-500 transition-all font-mono"
-                    value={naming.brand}
-                    onChange={(e) => updateNaming('brand', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">ISO (País)</label>
-                  <select 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
-                    value={naming.iso}
-                    onChange={(e) => updateNaming('iso', e.target.value)}
-                  >
-                    {NAMING_TAXONOMY.ISO.map(v => <option key={v} value={v}>{v.toUpperCase()}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Site</label>
-                  <select 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
-                    value={naming.site}
-                    onChange={(e) => updateNaming('site', e.target.value)}
-                  >
-                    {NAMING_TAXONOMY.Sites.map(v => <option key={v} value={v}>{v}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Campaña</label>
-                  <select 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
-                    value={naming.campaña}
-                    onChange={(e) => updateNaming('campaña', e.target.value)}
-                  >
-                    {NAMING_TAXONOMY.Campañas.map(v => <option key={v} value={v}>{v}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Canal</label>
-                  <select 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
-                    value={naming.canal}
-                    onChange={(e) => updateNaming('canal', e.target.value)}
-                  >
-                    {NAMING_TAXONOMY.Canales.map(v => <option key={v} value={v}>{v}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Funnel</label>
-                  <select 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
-                    value={naming.funnel}
-                    onChange={(e) => updateNaming('funnel', e.target.value)}
-                  >
-                    {NAMING_TAXONOMY.Funnel.map(v => <option key={v} value={v}>{v}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Tech</label>
-                  <select 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
-                    value={naming.tech}
-                    onChange={(e) => updateNaming('tech', e.target.value)}
-                  >
-                    {NAMING_TAXONOMY.Tech.map(v => <option key={v} value={v}>{v}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Device</label>
-                  <select 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
-                    value={naming.device}
-                    onChange={(e) => updateNaming('device', e.target.value)}
-                  >
-                    {NAMING_TAXONOMY.Device.map(v => <option key={v} value={v}>{v}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Format</label>
-                  <select 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
-                    value={naming.format}
-                    onChange={(e) => updateNaming('format', e.target.value)}
-                  >
-                    {NAMING_TAXONOMY.Formats.map(v => <option key={v} value={v}>{v}</option>)}
-                  </select>
-                </div>
+                {[
+                  { key: 'brand', label: 'Brand', type: 'input' },
+                  { key: 'iso', label: 'ISO (País)', type: 'select', options: NAMING_TAXONOMY.ISO },
+                  { key: 'site', label: 'Site', type: 'select', options: NAMING_TAXONOMY.Sites },
+                  { key: 'campaña', label: 'Campaña', type: 'select', options: NAMING_TAXONOMY.Campañas },
+                  { key: 'canal', label: 'Canal', type: 'select', options: NAMING_TAXONOMY.Canales },
+                  { key: 'funnel', label: 'Funnel', type: 'select', options: NAMING_TAXONOMY.Funnel },
+                  { key: 'tech', label: 'Tech', type: 'select', options: NAMING_TAXONOMY.Tech },
+                  { key: 'device', label: 'Device', type: 'select', options: NAMING_TAXONOMY.Device },
+                  { key: 'format', label: 'Format', type: 'select', options: NAMING_TAXONOMY.Formats },
+                ].map((field) => (
+                  <div key={field.key} className={`transition-opacity ${enabledFields[field.key as keyof typeof naming] ? 'opacity-100' : 'opacity-40'}`}>
+                    <div className="flex items-center justify-between mb-1.5 ml-1">
+                      <label className="block text-[10px] uppercase font-bold text-slate-500">{field.label}</label>
+                      <input 
+                        type="checkbox" 
+                        checked={enabledFields[field.key as keyof typeof naming]}
+                        onChange={() => setEnabledFields(prev => ({ ...prev, [field.key]: !prev[field.key as keyof typeof naming] }))}
+                        className="w-3 h-3 rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-blue-500/50"
+                      />
+                    </div>
+                    {field.type === 'input' ? (
+                      <input 
+                        type="text"
+                        disabled={!enabledFields[field.key as keyof typeof naming]}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-blue-400 focus:outline-none focus:border-blue-500 transition-all font-mono disabled:cursor-not-allowed"
+                        value={naming[field.key as keyof typeof naming]}
+                        onChange={(e) => updateNaming(field.key as keyof typeof naming, e.target.value)}
+                      />
+                    ) : (
+                      <select 
+                        disabled={!enabledFields[field.key as keyof typeof naming]}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all disabled:cursor-not-allowed"
+                        value={naming[field.key as keyof typeof naming]}
+                        onChange={(e) => updateNaming(field.key as keyof typeof naming, e.target.value)}
+                      >
+                        {field.options?.map(v => <option key={v} value={v}>{v.toUpperCase()}</option>)}
+                      </select>
+                    )}
+                  </div>
+                ))}
               </div>
             </section>
 

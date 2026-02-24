@@ -32,7 +32,6 @@ interface AppContextType {
   updatePlacement: (placement: Placement) => void;
   updatePlacementDraft: (placementId: string, changes: Partial<Placement>) => void;
   updatePlacementName: (placementId: string, newName: string) => void;
-  bulkRenamePlacements: (placementIds: string[], prefix: string, suffix: string) => void;
   deletePlacement: (id: string) => void;
   publishSelectedDrafts: (placementIds: string[]) => Promise<{success: number, failed: number, results: {id: string, success: boolean, error?: string}[]}>;
   
@@ -54,6 +53,8 @@ interface AppContextType {
   fetchSites: () => Promise<void>;
   fetchLandingPages: (advertiserId: string) => Promise<void>;
   createCampaign: (campaign: Partial<Campaign>) => Promise<{success: boolean, id?: string, error?: string}>;
+  updateCampaignStatus: (campaignId: string, status: Status) => Promise<{success: boolean, error?: string}>;
+  isCampaignsLoading: boolean;
   pushPlacements: (placementIds: string[]) => Promise<{success: number, failed: number, error?: string, createdItems: {id: string, cmId: string, name: string}[]}>;
   uploadCreative: (file: File, name: string, type: string, sizeStr?: string) => Promise<{success: boolean, id?: string, error?: string}>;
   updateCreativeStatus: (creativeIds: string[], active: boolean) => Promise<{success: number, failed: number, error?: string}>;
@@ -79,6 +80,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [currentView, setCurrentView] = useState<ViewType>('Placements');
   const [isGlobalSearchActive, setIsGlobalSearchActive] = useState<boolean>(false);
+  const [isCampaignsLoading, setIsCampaignsLoading] = useState<boolean>(false);
   const [connectionStatus, setConnectionStatus] = useState<'Connected' | 'Disconnected' | 'Connecting'>('Disconnected');
   
   const [accessToken, setAccessToken] = useState<string | null>(localStorage.getItem('cm360_token'));
@@ -159,7 +161,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       // 2. Buscar Perfiles en CM360
       console.log("📊 Buscando perfiles de CM360...");
-      const profilesRes = await fetch('https://dfareporting.googleapis.com/dfareporting/v4/userprofiles', {
+      const profilesRes = await fetch('/api/cm360/userprofiles', {
         headers: { Authorization: `Bearer ${token}` },
         signal: controller.signal
       });
@@ -224,7 +226,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const fetchAdvertisersInternal = async (token: string, pid: string) => {
     try {
       console.log("📡 Cargando anunciantes...");
-      const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${pid}/advertisers?maxResults=100`, {
+      const res = await fetch(`/api/cm360/userprofiles/${pid}/advertisers?maxResults=100`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
@@ -239,8 +241,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const fetchCampaignsInternal = async (token: string, pid: string, advertiserId: string) => {
     try {
+      setIsCampaignsLoading(true);
       console.log(`📡 Cargando campañas para el anunciante ${advertiserId}...`);
-      const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${pid}/campaigns?advertiserIds=${advertiserId}&maxResults=100&archived=false`, {
+      const res = await fetch(`/api/cm360/userprofiles/${pid}/campaigns?advertiserIds=${advertiserId}&maxResults=100&archived=false`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
@@ -264,6 +267,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     } catch (e) {
       console.error("Fetch campaigns error:", e);
+    } finally {
+      setIsCampaignsLoading(false);
     }
   };
 
@@ -290,7 +295,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!accessToken || !profileId || !campaignId) return;
     try {
       console.log(`📡 Cargando placements para la campaña ${campaignId}...`);
-      const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/placements?campaignIds=${campaignId}&maxResults=100`, {
+      const res = await fetch(`/api/cm360/userprofiles/${profileId}/placements?campaignIds=${campaignId}&maxResults=100`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
       const data = await res.json();
@@ -326,7 +331,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const fetchCreativesInternal = async (token: string, pid: string, advertiserId: string) => {
     try {
       console.log(`📡 Cargando creatividades para el anunciante ${advertiserId}...`);
-      const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${pid}/creatives?advertiserId=${advertiserId}&maxResults=100&archived=false`, {
+      const res = await fetch(`/api/cm360/userprofiles/${pid}/creatives?advertiserId=${advertiserId}&maxResults=100&archived=false`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
@@ -383,7 +388,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       
       for (let i = 0; i < limit; i++) {
         const adv = advertisers[i];
-        const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creatives?advertiserId=${adv.id}&maxResults=20&archived=false`, {
+        const res = await fetch(`/api/cm360/userprofiles/${profileId}/creatives?advertiserId=${adv.id}&maxResults=20&archived=false`, {
           headers: { Authorization: `Bearer ${accessToken}` }
         });
         const data = await res.json();
@@ -416,7 +421,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const fetchSitesInternal = async (token: string, pid: string) => {
     try {
       console.log("📡 Cargando sitios...");
-      const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${pid}/sites?maxResults=100`, {
+      const res = await fetch(`/api/cm360/userprofiles/${pid}/sites?maxResults=100`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
@@ -437,7 +442,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!accessToken || !profileId) return;
     try {
       console.log(`📡 Cargando landing pages para el anunciante ${advertiserId}...`);
-      const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/advertiserLandingPages?advertiserIds=${advertiserId}&maxResults=100`, {
+      const res = await fetch(`/api/cm360/userprofiles/${profileId}/advertiserLandingPages?advertiserIds=${advertiserId}&maxResults=100`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
       const data = await res.json();
@@ -471,7 +476,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         };
       }
 
-      const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/campaigns`, {
+      const res = await fetch(`/api/cm360/userprofiles/${profileId}/campaigns`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -479,15 +484,63 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         },
         body: JSON.stringify(body)
       });
-      const data = await res.json();
+      
       if (res.ok) {
+        const data = await res.json();
         await fetchCampaignsInternal(accessToken, profileId, selectedAdvertiser.id);
         return { success: true, id: data.id };
       }
-      return { success: false, error: data.error?.message || 'API Error' };
-    } catch (e) {
-      console.error("Create campaign error:", e);
-      return { success: false, error: 'Network error' };
+      
+      const data = await res.json().catch(() => ({}));
+      console.error("Create campaign API error:", data);
+      return { success: false, error: data.error?.message || `API Error ${res.status}: ${res.statusText}` };
+    } catch (e: any) {
+      console.error("Create campaign network error:", e);
+      return { success: false, error: e.message || 'Network error' };
+    }
+  };
+
+  const updateCampaignStatus = async (campaignId: string, status: Status) => {
+    // 1. Handle Demo Mode
+    if (isAuthenticated && !accessToken) {
+      console.log("🛠️ [Demo Mode] Simulating status update to:", status);
+      setCampaigns(prev => prev.map(c => c.id === campaignId ? { ...c, status } : c));
+      return { success: true };
+    }
+
+    if (!accessToken || !profileId) return { success: false, error: 'No connection' };
+
+    try {
+      console.log(`📡 Attempting to update campaign ${campaignId} to ${status} via Proxy...`);
+      
+      // We use the local proxy to avoid CORS issues.
+      // The proxy forwards the request to Google.
+      const res = await fetch(`/api/cm360/userprofiles/${profileId}/campaigns/${campaignId}?updateMask=archived`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: campaignId,
+          archived: status === 'Paused' || status === 'Completed'
+        })
+      });
+
+      if (res.ok) {
+        setCampaigns(prev => prev.map(c => c.id === campaignId ? { ...c, status } : c));
+        return { success: true };
+      }
+      
+      const data = await res.json().catch(() => ({}));
+      console.error("❌ CM360 API Error via Proxy:", data);
+      return { success: false, error: data.error?.message || `Error ${res.status}: ${res.statusText}` };
+    } catch (e: any) {
+      console.error("🚨 Proxy Connection Error:", e);
+      return { 
+        success: false, 
+        error: "Error de Servidor: No se pudo contactar con el proxy local. Intenta recargar la página." 
+      };
     }
   };
 
@@ -502,7 +555,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     for (const p of placementsToPush) {
       try {
-        const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/placements`, {
+        const res = await fetch(`/api/cm360/userprofiles/${profileId}/placements`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -562,10 +615,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateCreativeStatus = async (creativeIds: string[], active: boolean) => {
-    return bulkUpdateCreatives(creativeIds, { active });
-  };
-
-  const bulkUpdateCreatives = async (creativeIds: string[], updates: { active?: boolean, name?: { prefix?: string, suffix?: string } }) => {
     if (!accessToken || !profileId) return { success: 0, failed: creativeIds.length, error: 'No connection' };
     let successCount = 0;
     let failedCount = 0;
@@ -573,40 +622,31 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     for (const id of creativeIds) {
       try {
-        const creative = creatives.find(c => c.id === id);
-        if (!creative) {
-          failedCount++;
-          lastError = `Creative ${id} not found`;
-          continue;
-        }
-
-        const body: { active?: boolean, name?: string } = {};
-        if (updates.active !== undefined) {
-          body.active = updates.active;
-        }
-        if (updates.name) {
-          body.name = `${updates.name.prefix || ''}${creative.name}${updates.name.suffix || ''}`;
-        }
-
-        const res = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creatives/${id}`, {
+        // We use the local proxy to avoid CORS issues.
+        const res = await fetch(`/api/cm360/userprofiles/${profileId}/creatives/${id}?updateMask=active`, {
           method: 'PATCH',
           headers: {
             Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
           },
-          body: JSON.stringify(body)
+          body: JSON.stringify({ 
+            id: id,
+            active: active 
+          })
         });
         
         if (res.ok) {
           successCount++;
         } else {
           failedCount++;
-          const data = await res.json();
-          lastError = data.error?.message || `Error ${res.status}`;
+          const data = await res.json().catch(() => ({}));
+          lastError = data.error?.message || `API Error ${res.status}: ${res.statusText}`;
+          console.error(`Creative status update failed for ${id}:`, data);
         }
       } catch (e: any) {
         failedCount++;
-        lastError = e.message;
+        lastError = e.message || 'Network error';
+        console.error(`Creative status update network error for ${id}:`, e);
       }
     }
 
@@ -618,11 +658,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const copyCreative = async (creativeId: string, destinationAdvertiserId: string) => {
+    if (!accessToken || !profileId) return { success: false, error: 'No connection' };
     try {
       console.log(`📡 Iniciando copia de creatividad ${creativeId} al anunciante ${destinationAdvertiserId}...`);
       
       // 1. Get the source creative metadata
-      const getRes = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creatives/${creativeId}`, {
+      const getRes = await fetch(`/api/cm360/userprofiles/${profileId}/creatives/${creativeId}`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
       
@@ -661,7 +702,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
             formData.append('file', file);
 
-            const uploadRes = await fetch(`https://dfareporting.googleapis.com/upload/dfareporting/v4/userprofiles/${profileId}/creativeAssets/${destinationAdvertiserId}/creativeAssets?uploadType=multipart`, {
+            const uploadRes = await fetch(`/api/cm360-upload/upload/dfareporting/v4/userprofiles/${profileId}/creativeAssets/${destinationAdvertiserId}/creativeAssets?uploadType=multipart`, {
               method: 'POST',
               headers: { Authorization: `Bearer ${accessToken}` },
               body: formData
@@ -686,7 +727,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       creativeData.name = `${creativeData.name} (Copy)`;
       
       // 4. Insert into destination
-      const insertRes = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/creatives`, {
+      const insertRes = await fetch(`/api/cm360/userprofiles/${profileId}/creatives`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -715,7 +756,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       // 1. Create an Ad
       // We'll create a standard serving ad that links the creative to the placement
-      const adRes = await fetch(`https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/ads`, {
+      const adRes = await fetch(`/api/cm360/userprofiles/${profileId}/ads`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -808,26 +849,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     updatePlacementDraft(placementId, { name: newName });
   };
 
-  const bulkRenamePlacements = (placementIds: string[], prefix: string, suffix: string) => {
-    placementIds.forEach(id => {
-      const originalPlacement = placements.find(p => p.id === id) || placementsDrafts[id];
-      if (originalPlacement) {
-        const newName = `${prefix}${originalPlacement.name}${suffix}`;
-        updatePlacementDraft(id, { name: newName });
-      }
-    });
-  };
-
-  const bulkRenamePlacements = (placementIds: string[], prefix: string, suffix: string) => {
-    placementIds.forEach(id => {
-      const originalPlacement = placements.find(p => p.id === id);
-      if (originalPlacement) {
-        const newName = `${prefix}${originalPlacement.name}${suffix}`;
-        updatePlacementDraft(id, { name: newName });
-      }
-    });
-  };
-
   const publishSelectedDrafts = async (placementIds: string[]) => {
     if (!accessToken || !profileId) return { success: 0, failed: placementIds.length, results: [] };
     
@@ -842,8 +863,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       try {
         const isNew = !draft.cmId;
         const url = isNew 
-          ? `https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/placements`
-          : `https://dfareporting.googleapis.com/dfareporting/v4/userprofiles/${profileId}/placements/${draft.cmId}`;
+          ? `/api/cm360/userprofiles/${profileId}/placements`
+          : `/api/cm360/userprofiles/${profileId}/placements/${draft.cmId}`;
         
         const method = isNew ? 'POST' : 'PATCH';
         
@@ -922,9 +943,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       advertisers, campaigns, placements, placementsDrafts, creatives, sites, landingPages,
       selectedAdvertiser, selectedCampaign, currentView, isGlobalSearchActive,
       setSelectedAdvertiser, setSelectedCampaign, setCurrentView, setIsGlobalSearchActive,
-      addPlacements, updatePlacement, updatePlacementDraft, updatePlacementName, bulkRenamePlacements, deletePlacement, publishSelectedDrafts,
+      addPlacements, updatePlacement, updatePlacementDraft, updatePlacementName, deletePlacement, publishSelectedDrafts,
       connectionStatus, isAuthenticated, accessToken, profileId, accountId, user, login, loginWithToken, enterDemoMode, logout,
-      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchCreatives, fetchAllCreatives, fetchSites, fetchLandingPages, createCampaign, pushPlacements, uploadCreative, updateCreativeStatus, bulkUpdateCreatives, copyCreative, assignCreativeToPlacement
+      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchCreatives, fetchAllCreatives, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement
     }}>
       {children}
     </AppContext.Provider>
