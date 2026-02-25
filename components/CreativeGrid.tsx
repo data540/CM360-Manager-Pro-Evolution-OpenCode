@@ -22,6 +22,7 @@ import {
   ChevronDown as ChevronDownIcon,
   X as XIcon,
   Layers,
+  LayoutDashboard,
   SearchCode,
   UploadCloud,
   Loader2
@@ -41,11 +42,17 @@ const CreativeGrid: React.FC = () => {
     setIsGlobalSearchActive,
     advertisers,
     fetchAllCreatives,
-    copyCreative
+    copyCreative,
+    campaigns, 
+    placements,
+    fetchCampaigns,
+    fetchPlacements,
+    assignCreativeToPlacement
   } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [loading, setLoading] = useState(false);
+  const [activeActionMenu, setActiveActionMenu] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isNewMenuOpen, setIsNewMenuOpen] = useState(false);
@@ -57,10 +64,12 @@ const CreativeGrid: React.FC = () => {
   const [namingText, setNamingText] = useState('');
   const [includeDate, setIncludeDate] = useState(true);
   
-  // Assign to Advertiser States
-  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+  // Modals States
+  const [activeModal, setActiveModal] = useState<'advertiser' | 'campaign' | 'placement' | null>(null);
   const [creativeToAssign, setCreativeToAssign] = useState<Creative | null>(null);
   const [destAdvertiserId, setDestAdvertiserId] = useState('');
+  const [destCampaignId, setDestCampaignId] = useState('');
+  const [destPlacementId, setDestPlacementId] = useState('');
   const [isAssigning, setIsAssigning] = useState(false);
   
   // Batch Upload States
@@ -72,6 +81,18 @@ const CreativeGrid: React.FC = () => {
   const [selectedFormat, setSelectedFormat] = useState('Display');
   const [selectedSize, setSelectedSize] = useState('');
   const [isErrorGuideOpen, setIsErrorGuideOpen] = useState(false);
+
+  useEffect(() => {
+    if (activeModal === 'campaign' && destAdvertiserId) {
+      fetchCampaigns(destAdvertiserId);
+    }
+  }, [activeModal, destAdvertiserId, fetchCampaigns]);
+
+  useEffect(() => {
+    if (activeModal === 'placement' && destCampaignId) {
+      fetchPlacements(destCampaignId);
+    }
+  }, [activeModal, destCampaignId, fetchPlacements]);
   
   const CREATIVE_SPECS: Record<string, string[]> = {
     'Display': ['970x250', '970x90', '728x90', '300x250', '160x600', '300x600', '300x1050', '468x60', '250x250', '200x200'],
@@ -262,7 +283,7 @@ const CreativeGrid: React.FC = () => {
 
     const result = await copyCreative(creativeToAssign.id, destAdvertiserId);
     setIsAssigning(false);
-    setIsAssignModalOpen(false);
+    setActiveModal(null);
 
     if (result.success) {
       setToast({
@@ -282,11 +303,43 @@ const CreativeGrid: React.FC = () => {
     }
   };
 
+  const handleAssignToPlacement = async () => {
+    if (!creativeToAssign || !destPlacementId || !destCampaignId) return;
+    setIsAssigning(true);
+    setToast({
+      show: true,
+      type: 'loading',
+      message: 'Creating Ad...',
+      details: `Linking ${creativeToAssign.name} to placement.`
+    });
+
+    const result = await assignCreativeToPlacement(creativeToAssign.id, destPlacementId, destCampaignId);
+    setIsAssigning(false);
+    setActiveModal(null);
+
+    if (result.success) {
+      setToast({
+        show: true,
+        type: 'success',
+        message: 'Ad Created!',
+        details: 'The creative has been linked to the placement via a new Ad.',
+        link: `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}/campaigns/${destCampaignId}/explorer/ads/${result.id}`
+      });
+    } else {
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'Assignment Failed',
+        details: result.error
+      });
+    }
+  };
+
   useEffect(() => {
     if (isGlobalSearchActive && !selectedAdvertiser) {
       fetchAllCreatives();
     }
-  }, [isGlobalSearchActive, selectedAdvertiser]);
+  }, [isGlobalSearchActive, selectedAdvertiser, fetchAllCreatives]);
 
   const filteredCreatives = creatives.filter(c => {
     const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -544,16 +597,58 @@ const CreativeGrid: React.FC = () => {
                         <ExternalLink className="w-4 h-4" />
                       </a>
                     )}
-                    <button 
-                      onClick={() => {
-                        setCreativeToAssign(creative);
-                        setIsAssignModalOpen(true);
-                      }}
-                      className="p-2 bg-slate-800 rounded-lg text-white hover:bg-slate-700 transition-colors border border-slate-700"
-                      title="Assign to Advertiser"
-                    >
-                      <Layers className="w-4 h-4" />
-                    </button>
+                    <div className="relative">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveActionMenu(activeActionMenu === creative.id ? null : creative.id);
+                        }}
+                        className="p-2 bg-slate-800 rounded-lg text-white hover:bg-slate-700 transition-colors border border-slate-700"
+                        title="Actions"
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </button>
+
+                      {activeActionMenu === creative.id && (
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 py-1 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+                          <button 
+                            onClick={() => {
+                              setCreativeToAssign(creative);
+                              setActiveModal('advertiser');
+                              setActiveActionMenu(null);
+                            }}
+                            className="w-full flex items-center gap-3 px-4 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-colors"
+                          >
+                            <Layers className="w-3.5 h-3.5" />
+                            Assign to Advertiser
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setCreativeToAssign(creative);
+                              setDestAdvertiserId(selectedAdvertiser?.id || '');
+                              setActiveModal('campaign');
+                              setActiveActionMenu(null);
+                            }}
+                            className="w-full flex items-center gap-3 px-4 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-colors"
+                          >
+                            <LayoutDashboard className="w-3.5 h-3.5" />
+                            Assign to Campaign
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setCreativeToAssign(creative);
+                              setDestCampaignId(selectedCampaign?.id || '');
+                              setActiveModal('placement');
+                              setActiveActionMenu(null);
+                            }}
+                            className="w-full flex items-center gap-3 px-4 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-colors"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Assign to Placement (Ad)
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div className="absolute top-3 left-3">
                     <span className="px-2 py-1 rounded-md bg-slate-900/80 backdrop-blur-md border border-slate-700 text-[9px] font-bold text-slate-300 uppercase tracking-wider">
@@ -656,19 +751,58 @@ const CreativeGrid: React.FC = () => {
                             <ExternalLink className="w-4 h-4" />
                           </a>
                         )}
-                        <button 
-                          onClick={() => {
-                            setCreativeToAssign(creative);
-                            setIsAssignModalOpen(true);
-                          }}
-                          className="p-1.5 rounded-md text-slate-600 hover:bg-slate-800 hover:text-slate-300 transition-all"
-                          title="Assign to Advertiser"
-                        >
-                          <Layers className="w-4 h-4" />
-                        </button>
-                        <button className="p-1.5 rounded-md text-slate-600 hover:bg-slate-800 hover:text-slate-300 transition-all">
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
+                        <div className="relative">
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveActionMenu(activeActionMenu === creative.id ? null : creative.id);
+                            }}
+                            className="p-1.5 rounded-md text-slate-600 hover:bg-slate-800 hover:text-slate-300 transition-all"
+                            title="Actions"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+
+                          {activeActionMenu === creative.id && (
+                            <div className="absolute right-full top-0 mr-2 w-48 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 py-1 overflow-hidden animate-in fade-in slide-in-from-right-2">
+                              <button 
+                                onClick={() => {
+                                  setCreativeToAssign(creative);
+                                  setActiveModal('advertiser');
+                                  setActiveActionMenu(null);
+                                }}
+                                className="w-full flex items-center gap-3 px-4 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-colors"
+                              >
+                                <Layers className="w-3.5 h-3.5" />
+                                Assign to Advertiser
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  setCreativeToAssign(creative);
+                                  setDestAdvertiserId(selectedAdvertiser?.id || '');
+                                  setActiveModal('campaign');
+                                  setActiveActionMenu(null);
+                                }}
+                                className="w-full flex items-center gap-3 px-4 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-colors"
+                              >
+                                <LayoutDashboard className="w-3.5 h-3.5" />
+                                Assign to Campaign
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  setCreativeToAssign(creative);
+                                  setDestCampaignId(selectedCampaign?.id || '');
+                                  setActiveModal('placement');
+                                  setActiveActionMenu(null);
+                                }}
+                                className="w-full flex items-center gap-3 px-4 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-colors"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                Assign to Placement (Ad)
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </td>
                   </tr>
@@ -835,23 +969,14 @@ const CreativeGrid: React.FC = () => {
         </div>
       )}
 
-      {/* Assign to Advertiser Modal */}
-      {isAssignModalOpen && (
+      {/* Assignment Modals */}
+      {activeModal === 'advertiser' && creativeToAssign && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <h3 className="text-xl font-bold text-white mb-2">Assign to Advertiser</h3>
-            <p className="text-slate-400 text-sm mb-6">
-              Select a destination advertiser to copy this creative to.
-            </p>
+            <p className="text-slate-400 text-sm mb-6">This will copy the creative "{creativeToAssign.name}" to the selected advertiser's library.</p>
             
             <div className="space-y-4">
-              <div>
-                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Creative</label>
-                <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs text-blue-400 font-mono">
-                  {creativeToAssign?.name}
-                </div>
-              </div>
-
               <div>
                 <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Destination Advertiser</label>
                 <select 
@@ -859,26 +984,140 @@ const CreativeGrid: React.FC = () => {
                   value={destAdvertiserId}
                   onChange={(e) => setDestAdvertiserId(e.target.value)}
                 >
-                  <option value="">Select advertiser...</option>
+                  <option value="">Select an advertiser...</option>
                   {advertisers.map(adv => (
                     <option key={adv.id} value={adv.id}>{adv.name}</option>
                   ))}
                 </select>
               </div>
-              
+
               <div className="flex gap-3 pt-4">
                 <button 
-                  onClick={() => setIsAssignModalOpen(false)}
-                  className="flex-1 py-3 text-slate-400 hover:text-white font-bold transition-all"
+                  onClick={() => setActiveModal(null)}
+                  className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
                 >
                   Cancel
                 </button>
                 <button 
                   onClick={handleAssign}
                   disabled={!destAdvertiserId || isAssigning}
-                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20 disabled:opacity-50"
+                  className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {isAssigning ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Confirm Assignment'}
+                  {isAssigning ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm Copy'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeModal === 'campaign' && creativeToAssign && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-bold text-white mb-2">Assign to Campaign</h3>
+            <p className="text-slate-400 text-sm mb-6">The creative "{creativeToAssign.name}" will be made available in the selected campaign.</p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Advertiser</label>
+                <select 
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all appearance-none"
+                  value={destAdvertiserId}
+                  onChange={(e) => setDestAdvertiserId(e.target.value)}
+                >
+                  <option value="">Select an advertiser...</option>
+                  {advertisers.map(adv => (
+                    <option key={adv.id} value={adv.id}>{adv.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Campaign</label>
+                <select 
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all appearance-none"
+                  value={destCampaignId}
+                  onChange={(e) => setDestCampaignId(e.target.value)}
+                  disabled={!destAdvertiserId}
+                >
+                  <option value="">Select a campaign...</option>
+                  {campaigns.map(camp => (
+                    <option key={camp.id} value={camp.id}>{camp.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button 
+                  onClick={() => setActiveModal(null)}
+                  className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => {
+                    handleAssign();
+                  }}
+                  disabled={!destCampaignId || isAssigning}
+                  className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isAssigning ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm Assignment'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeModal === 'placement' && creativeToAssign && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-bold text-white mb-2">Assign to Placement (Ad)</h3>
+            <p className="text-slate-400 text-sm mb-6">Create a new Ad linking "{creativeToAssign.name}" to a specific placement.</p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Campaign</label>
+                <select 
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all appearance-none"
+                  value={destCampaignId}
+                  onChange={(e) => setDestCampaignId(e.target.value)}
+                >
+                  <option value="">Select a campaign...</option>
+                  {campaigns.map(camp => (
+                    <option key={camp.id} value={camp.id}>{camp.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Placement</label>
+                <select 
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all appearance-none"
+                  value={destPlacementId}
+                  onChange={(e) => setDestPlacementId(e.target.value)}
+                  disabled={!destCampaignId}
+                >
+                  <option value="">Select a placement...</option>
+                  {placements.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} ({p.size})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button 
+                  onClick={() => setActiveModal(null)}
+                  className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleAssignToPlacement}
+                  disabled={!destPlacementId || isAssigning}
+                  className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isAssigning ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Ad'}
                 </button>
               </div>
             </div>
