@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { Advertiser, Campaign, Placement, Creative, ViewType, Site } from '../types';
+import { Advertiser, Campaign, Placement, Creative, ViewType, Site, Status } from '../types';
 import { MOCK_ADVERTISERS, MOCK_CAMPAIGNS, MOCK_PLACEMENTS, MOCK_CREATIVES, MOCK_SITES } from '../constants';
 
 interface UserProfile {
@@ -12,6 +12,7 @@ interface UserProfile {
 interface AppContextType {
   advertisers: Advertiser[];
   campaigns: Campaign[];
+  campaignsDrafts: { [id: string]: Partial<Campaign> & { isDraft?: boolean } };
   placements: Placement[];
   placementsDrafts: { [id: string]: Placement };
   creatives: Creative[];
@@ -29,6 +30,7 @@ interface AppContextType {
   setIsGlobalSearchActive: (active: boolean) => void;
   
   addPlacements: (newPlacements: Placement[]) => void;
+  updateCampaignDraft: (campaignId: string, changes: Partial<Campaign>) => void;
   updatePlacement: (placement: Placement) => void;
   updatePlacementDraft: (placementId: string, changes: Partial<Placement>) => void;
   updatePlacementName: (placementId: string, newName: string) => void;
@@ -54,6 +56,7 @@ interface AppContextType {
   fetchLandingPages: (advertiserId: string) => Promise<void>;
   createCampaign: (campaign: Partial<Campaign>) => Promise<{success: boolean, id?: string, error?: string}>;
   updateCampaignStatus: (campaignId: string, status: Status) => Promise<{success: boolean, error?: string}>;
+  pushCampaigns: (campaignIds: string[]) => Promise<{success: number, failed: number, error?: string}>;
   isCampaignsLoading: boolean;
   pushPlacements: (placementIds: string[]) => Promise<{success: number, failed: number, error?: string, createdItems: {id: string, cmId: string, name: string}[]}>;
   uploadCreative: (file: File, name: string, type: string, sizeStr?: string) => Promise<{success: boolean, id?: string, error?: string}>;
@@ -70,6 +73,7 @@ const CM360_SCOPES = "https://www.googleapis.com/auth/dfareporting https://www.g
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [advertisers, setAdvertisers] = useState<Advertiser[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaignsDrafts, setCampaignsDrafts] = useState<{ [id: string]: Partial<Campaign> & { isDraft?: boolean } }>({});
   const [placements, setPlacements] = useState<Placement[]>([]);
   const [placementsDrafts, setPlacementsDrafts] = useState<{ [id: string]: Placement }>({});
   const [creatives, setCreatives] = useState<Creative[]>([]);
@@ -146,7 +150,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       
       // 1. Validar usuario (UserInfo)
       console.log("👤 Verificando identidad del usuario...");
-      const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      const userInfoRes = await fetch('/api/google/oauth2/v3/userinfo', {
         headers: { Authorization: `Bearer ${token}` },
         signal: controller.signal
       });
@@ -210,9 +214,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     } catch (error: any) {
       clearTimeout(timeoutId);
       const isTimeout = error.name === 'AbortError';
-      const message = isTimeout 
+      const isFetchError = error?.message === 'Failed to fetch';
+      const message = isTimeout
         ? "TIEMPO AGOTADO: Google no responde. Revisa tu conexión a internet o intenta de nuevo."
-        : error.message;
+        : isFetchError
+          ? "ERROR DE RED: No se pudo contactar con el proxy/API. Verifica que la app corra en http://localhost:3000 y reintenta."
+          : error.message;
         
       console.error("🚨 Fallo en la autenticación:", message);
       setConnectionStatus('Disconnected');
@@ -260,9 +267,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           updatedAt: new Date().toISOString()
         }));
         setCampaigns(mappedCampaigns);
+        setCampaignsDrafts({});
         console.log(`✅ ${mappedCampaigns.length} campañas cargadas.`);
       } else {
         setCampaigns([]);
+        setCampaignsDrafts({});
         console.log("ℹ️ No se encontraron campañas activas para este anunciante.");
       }
     } catch (e) {
@@ -544,6 +553,80 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const updateCampaignDraft = (campaignId: string, changes: Partial<Campaign>) => {
+    setCampaignsDrafts(prev => {
+      const base = campaigns.find(c => c.id === campaignId);
+      if (!base) return prev;
+
+      return {
+        ...prev,
+        [campaignId]: {
+          ...base,
+          ...prev[campaignId],
+          ...changes,
+          isDraft: true,
+        }
+      };
+    });
+  };
+
+  const pushCampaigns = async (campaignIds: string[]) => {
+    if (!accessToken || !profileId) return { success: 0, failed: campaignIds.length, error: 'No connection' };
+
+    let successCount = 0;
+    let failedCount = 0;
+    let lastError = '';
+
+    for (const campaignId of campaignIds) {
+      const draft = campaignsDrafts[campaignId];
+      if (!draft) continue;
+
+      try {
+        const updateMask = ['name', 'startDate', 'endDate', 'archived'].join(',');
+        const res = await fetch(`/api/cm360/userprofiles/${profileId}/campaigns/${campaignId}?updateMask=${updateMask}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            id: campaignId,
+            name: draft.name,
+            startDate: draft.startDate,
+            endDate: draft.endDate,
+            archived: draft.status === 'Paused' || draft.status === 'Completed'
+          })
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          successCount++;
+          setCampaigns(prev => prev.map(c => c.id === campaignId ? {
+            ...c,
+            ...(draft.name ? { name: draft.name } : {}),
+            ...(draft.startDate ? { startDate: draft.startDate } : {}),
+            ...(draft.endDate ? { endDate: draft.endDate } : {}),
+            ...(draft.status ? { status: draft.status } : {}),
+          } : c));
+
+          setCampaignsDrafts(prev => {
+            const next = { ...prev };
+            delete next[campaignId];
+            return next;
+          });
+        } else {
+          failedCount++;
+          lastError = data.error?.message || `Error ${res.status}`;
+        }
+      } catch (e: any) {
+        failedCount++;
+        lastError = e.message || 'Network error';
+      }
+    }
+
+    return { success: successCount, failed: failedCount, error: lastError };
+  };
+
   const pushPlacements = async (placementIds: string[]) => {
     if (!accessToken || !profileId) return { success: 0, failed: placementIds.length, createdItems: [] };
     let successCount = 0;
@@ -611,7 +694,154 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const uploadCreative = async (file: File, name: string, format: string, sizeStr?: string) => {
-    // ... existing implementation ...
+    if (!accessToken || !profileId || !selectedAdvertiser) return { success: false, error: 'No connection' };
+
+    const parseApiError = async (res: Response, fallback: string) => {
+      try {
+        const data = await res.json();
+        return data?.error?.message || fallback;
+      } catch {
+        return `${fallback} (${res.status}: ${res.statusText})`;
+      }
+    };
+
+    const normalizeFormat = (input: string) => {
+      const lower = (input || '').toLowerCase();
+      if (lower.includes('video')) return 'Video';
+      if (lower.includes('rich')) return 'Rich Media';
+      if (lower.includes('tracking')) return 'Tracking';
+      if (lower.includes('mobile')) return 'Mobile Display';
+      return 'Display';
+    };
+
+    const getImageDimensions = async (imageFile: File): Promise<{ width: number; height: number } | null> => {
+      return new Promise((resolve) => {
+        try {
+          const objectUrl = URL.createObjectURL(imageFile);
+          const img = new Image();
+          img.onload = () => {
+            const width = img.naturalWidth || img.width;
+            const height = img.naturalHeight || img.height;
+            URL.revokeObjectURL(objectUrl);
+            resolve(width > 0 && height > 0 ? { width, height } : null);
+          };
+          img.onerror = () => {
+            URL.revokeObjectURL(objectUrl);
+            resolve(null);
+          };
+          img.src = objectUrl;
+        } catch {
+          resolve(null);
+        }
+      });
+    };
+
+    try {
+      const fileName = file.name.toLowerCase();
+      const normalizedFormat = normalizeFormat(format);
+      const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(fileName);
+      const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|webm|avi|m4v)$/i.test(fileName);
+      const isZip = file.type === 'application/zip' || fileName.endsWith('.zip');
+
+      let assetType = 'HTML';
+      if (isVideo) assetType = 'VIDEO';
+      else if (isZip) assetType = 'HTML';
+      else if (isImage) assetType = 'HTML_IMAGE';
+
+      let width = isVideo ? 0 : 300;
+      let height = isVideo ? 0 : 250;
+
+      if (sizeStr) {
+        const sizeMatches = sizeStr.match(/(\d+)\s*[x×]\s*(\d+)/i);
+        if (sizeMatches) {
+          width = parseInt(sizeMatches[1], 10);
+          height = parseInt(sizeMatches[2], 10);
+        }
+      }
+
+      if (!sizeStr && isImage) {
+        const dimensions = await getImageDimensions(file);
+        if (dimensions) {
+          width = dimensions.width;
+          height = dimensions.height;
+        }
+      }
+
+      const metadata = {
+        assetIdentifier: {
+          type: assetType,
+          name: file.name,
+        },
+      };
+
+      const formData = new FormData();
+      formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+      formData.append('file', file);
+
+      const assetRes = await fetch(`/api/cm360-upload/upload/dfareporting/v4/userprofiles/${profileId}/creativeAssets/${selectedAdvertiser.id}/creativeAssets?uploadType=multipart`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: formData,
+      });
+
+      if (!assetRes.ok) {
+        const uploadError = await parseApiError(assetRes, 'Asset upload failed');
+        return { success: false, error: uploadError };
+      }
+
+      const assetData = await assetRes.json();
+      const confirmedAssetIdentifier = assetData.assetIdentifier || metadata.assetIdentifier;
+
+      let creativeType = 'DISPLAY';
+      if (normalizedFormat === 'Video') creativeType = 'INSTREAM_VIDEO';
+      else if (normalizedFormat === 'Rich Media') creativeType = 'RICH_MEDIA_DISPLAY_BANNER';
+      else if (normalizedFormat === 'Tracking') creativeType = 'TRACKING_TEXT';
+
+      let assetRole = 'PRIMARY';
+      if (creativeType === 'INSTREAM_VIDEO') {
+        assetRole = confirmedAssetIdentifier.type === 'VIDEO' ? 'PARENT_VIDEO' : 'PRIMARY';
+      }
+
+      const creativeRes = await fetch(`/api/cm360/userprofiles/${profileId}/creatives`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          advertiserId: selectedAdvertiser.id,
+          name,
+          type: creativeType,
+          size: { width, height },
+          active: true,
+          creativeAssets: [
+            {
+              assetIdentifier: {
+                type: confirmedAssetIdentifier.type,
+                name: confirmedAssetIdentifier.name,
+              },
+              role: assetRole,
+              size: { width, height },
+            },
+          ],
+        }),
+      });
+
+      const creativeData = await creativeRes.json().catch(() => ({}));
+      if (creativeRes.ok) {
+        await fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
+        return { success: true, id: creativeData.id };
+      }
+
+      const apiErrorMessage = creativeData.error?.message || `Creative creation failed (${creativeRes.status})`;
+      return {
+        success: false,
+        error: `${apiErrorMessage} [Type: ${creativeType}, Asset: ${confirmedAssetIdentifier.type}, Role: ${assetRole}]`,
+      };
+    } catch (e: any) {
+      console.error('Upload creative error:', e);
+      return { success: false, error: e.message || 'Network error' };
+    }
   };
 
   const updateCreativeStatus = async (creativeIds: string[], active: boolean) => {
@@ -940,12 +1170,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   return (
     <AppContext.Provider value={{
-      advertisers, campaigns, placements, placementsDrafts, creatives, sites, landingPages,
+      advertisers, campaigns, campaignsDrafts, placements, placementsDrafts, creatives, sites, landingPages,
       selectedAdvertiser, selectedCampaign, currentView, isGlobalSearchActive,
       setSelectedAdvertiser, setSelectedCampaign, setCurrentView, setIsGlobalSearchActive,
-      addPlacements, updatePlacement, updatePlacementDraft, updatePlacementName, deletePlacement, publishSelectedDrafts,
+      addPlacements, updateCampaignDraft, updatePlacement, updatePlacementDraft, updatePlacementName, deletePlacement, publishSelectedDrafts,
       connectionStatus, isAuthenticated, accessToken, profileId, accountId, user, login, loginWithToken, enterDemoMode, logout,
-      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchCreatives, fetchAllCreatives, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement
+      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchCreatives, fetchAllCreatives, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, pushCampaigns, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement
     }}>
       {children}
     </AppContext.Provider>
