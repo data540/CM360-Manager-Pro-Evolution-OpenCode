@@ -29,6 +29,7 @@ const PlacementGrid: React.FC = () => {
     placementsDrafts, 
     creatives, 
     selectedCampaign, 
+    addPlacements,
     deletePlacement, 
     pushPlacements, 
     publishSelectedDrafts,
@@ -154,6 +155,33 @@ const PlacementGrid: React.FC = () => {
     link.click();
   };
 
+  const handleDuplicateSelected = () => {
+    if (selectedRows.size === 0) return;
+
+    const now = new Date().toISOString().split('T')[0];
+    const selectedPlacements = filteredPlacements.filter((p) => selectedRows.has(p.id));
+    if (selectedPlacements.length === 0) return;
+
+    const duplicates: Placement[] = selectedPlacements.map((placement) => ({
+      ...placement,
+      id: `plc-${Math.random().toString(36).slice(2, 11)}`,
+      name: `${placement.name}_copy`,
+      status: 'Draft',
+      createdAt: now,
+      updatedAt: now,
+      isDraft: true,
+    }));
+
+    addPlacements(duplicates);
+    setSelectedRows(new Set(duplicates.map((item) => item.id)));
+    setToast({
+      show: true,
+      type: 'success',
+      message: 'Placements duplicated',
+      details: `${duplicates.length} duplicated placement(s) added as drafts.`
+    });
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-950/40">
       <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-4 bg-slate-900/50 backdrop-blur-sm">
@@ -174,7 +202,7 @@ const PlacementGrid: React.FC = () => {
               <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">{selectedRows.size} selected</span>
               <div className="w-px h-4 bg-blue-500/20" />
               <button onClick={() => setIsBulkNamingOpen(true)} className="text-slate-400 hover:text-white transition-colors" title="Bulk Naming"><Zap className="w-3.5 h-3.5" /></button>
-              <button className="text-slate-400 hover:text-white transition-colors" title="Duplicate"><Copy className="w-3.5 h-3.5" /></button>
+              <button onClick={handleDuplicateSelected} className="text-slate-400 hover:text-white transition-colors" title="Duplicate"><Copy className="w-3.5 h-3.5" /></button>
               <button 
                 onClick={() => {
                   selectedRows.forEach(id => deletePlacement(id));

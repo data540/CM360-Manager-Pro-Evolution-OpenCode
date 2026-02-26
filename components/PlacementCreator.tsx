@@ -11,6 +11,12 @@ interface PlacementCreatorProps {
 
 const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
   const { selectedCampaign, sites, addPlacements } = useApp();
+  const todayISO = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const plus30DaysISO = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    return d.toISOString().split('T')[0];
+  }, []);
   
   // Naming Parts
   const [naming, setNaming] = useState({
@@ -53,14 +59,23 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
     }
   }, [sites, selectedSiteId]);
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
-  const [startDate, setStartDate] = useState(selectedCampaign?.startDate || '');
-  const [endDate, setEndDate] = useState(selectedCampaign?.endDate || '');
+  const [startDate, setStartDate] = useState(todayISO);
+  const [endDate, setEndDate] = useState(selectedCampaign?.endDate || plus30DaysISO);
+  const [createdInSession, setCreatedInSession] = useState<Placement[]>([]);
 
   const namePrefix = useMemo(() => {
     const { brand, iso, site, campaña, canal, funnel, tech, device, format } = naming;
-    const parts = [];
-    if (enabledFields.brand) parts.push(brand);
-    if (enabledFields.iso) parts.push(iso);
+    const parts: string[] = [];
+
+    const hasBrand = enabledFields.brand;
+    const hasIso = enabledFields.iso;
+    if (hasBrand && hasIso) {
+      parts.push(`${brand}-${iso}`);
+    } else {
+      if (hasBrand) parts.push(brand);
+      if (hasIso) parts.push(iso);
+    }
+
     if (enabledFields.site) parts.push(site);
     if (enabledFields.campaña) parts.push(campaña);
     if (enabledFields.canal) parts.push(canal);
@@ -97,7 +112,8 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
     }));
 
     addPlacements(newPlacements);
-    onClose();
+    setCreatedInSession(prev => [...newPlacements, ...prev]);
+    setSelectedSizes([]);
   };
 
   const updateNaming = (key: keyof typeof naming, value: string) => {
@@ -227,6 +243,28 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-xs text-blue-300 break-all leading-relaxed">
                   {namePrefix}_<span className="text-slate-500">[SIZE]</span>_
                </div>
+
+               <div className="mt-4 pt-4 border-t border-slate-800/70">
+                 <div className="flex items-center justify-between mb-2">
+                   <span className="text-[10px] uppercase font-bold text-slate-500 tracking-widest">Created In This Session</span>
+                   <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                     {createdInSession.length}
+                   </span>
+                 </div>
+
+                 <div className="space-y-2 max-h-[160px] overflow-y-auto custom-scrollbar pr-2">
+                   {createdInSession.length === 0 ? (
+                     <p className="text-[10px] text-slate-600 italic">No placements added yet in this builder session.</p>
+                   ) : (
+                     createdInSession.map((placement) => (
+                       <div key={placement.id} className="flex items-center gap-2 text-[10px] font-mono text-slate-400 bg-slate-950/60 p-2 rounded-lg border border-slate-800/70">
+                         <Layers className="w-3 h-3 shrink-0 text-emerald-500" />
+                         <span className="truncate">{placement.name}</span>
+                       </div>
+                     ))
+                   )}
+                 </div>
+               </div>
             </div>
           </div>
 
@@ -327,7 +365,7 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
               disabled={selectedSizes.length === 0 || sites.length === 0}
               className="flex items-center gap-2 px-8 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-sm transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50 disabled:grayscale"
             >
-              Generate {selectedSizes.length} Placements
+              Add {selectedSizes.length} Placements
             </button>
           </div>
         </div>

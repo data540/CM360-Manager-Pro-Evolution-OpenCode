@@ -59,6 +59,19 @@ export interface Creative {
   externalUrl?: string;
 }
 
+export interface Ad {
+  id: string;
+  name: string;
+  campaignId: string;
+  active: boolean;
+  status: Status;
+  placementIds: string[];
+  creativeIds: string[];
+  startTime?: string;
+  endTime?: string;
+  externalUrl?: string;
+}
+
 export interface BatchItem {
   id: string;
   name: string;
@@ -69,4 +82,4 @@ export interface BatchItem {
   errors: string[];
 }
 
-export type ViewType = 'Campaigns' | 'Placements' | 'Creatives' | 'AIHelper' | 'Settings';
+export type ViewType = 'Campaigns' | 'Placements' | 'Ads' | 'Creatives' | 'AIHelper' | 'Settings';

@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { Advertiser, Campaign, Placement, Creative, ViewType, Site, Status } from '../types';
+import { Advertiser, Campaign, Placement, Creative, Ad, ViewType, Site, Status } from '../types';
 import { MOCK_ADVERTISERS, MOCK_CAMPAIGNS, MOCK_PLACEMENTS, MOCK_CREATIVES, MOCK_SITES } from '../constants';
 
 interface UserProfile {
@@ -15,17 +15,20 @@ interface AppContextType {
   campaignsDrafts: { [id: string]: Partial<Campaign> & { isDraft?: boolean } };
   placements: Placement[];
   placementsDrafts: { [id: string]: Placement };
+  ads: Ad[];
   creatives: Creative[];
   sites: Site[];
   landingPages: { id: string, name: string, url: string }[];
   
   selectedAdvertiser: Advertiser | null;
   selectedCampaign: Campaign | null;
+  selectedAd: Ad | null;
   currentView: ViewType;
   isGlobalSearchActive: boolean;
   
   setSelectedAdvertiser: (adv: Advertiser | null) => void;
   setSelectedCampaign: (camp: Campaign | null) => void;
+  setSelectedAd: (ad: Ad | null) => void;
   setCurrentView: (view: ViewType) => void;
   setIsGlobalSearchActive: (active: boolean) => void;
   
@@ -50,6 +53,7 @@ interface AppContextType {
   fetchAdvertisers: () => Promise<void>;
   fetchCampaigns: (advertiserId: string) => Promise<void>;
   fetchPlacements: (campaignId: string) => Promise<void>;
+  fetchAds: (campaignId: string, placementId?: string) => Promise<void>;
   fetchCreatives: () => Promise<void>;
   fetchAllCreatives: () => Promise<void>;
   fetchSites: () => Promise<void>;
@@ -63,6 +67,8 @@ interface AppContextType {
   updateCreativeStatus: (creativeIds: string[], active: boolean) => Promise<{success: number, failed: number, error?: string}>;
   copyCreative: (creativeId: string, destinationAdvertiserId: string) => Promise<{success: boolean, id?: string, error?: string}>;
   assignCreativeToPlacement: (creativeId: string, placementId: string, campaignId: string) => Promise<{success: boolean, id?: string, error?: string}>;
+  assignCreativeToAd: (creativeId: string, adId: string, campaignId?: string) => Promise<{success: boolean, id?: string, error?: string}>;
+  isAdsLoading: boolean;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -76,15 +82,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [campaignsDrafts, setCampaignsDrafts] = useState<{ [id: string]: Partial<Campaign> & { isDraft?: boolean } }>({});
   const [placements, setPlacements] = useState<Placement[]>([]);
   const [placementsDrafts, setPlacementsDrafts] = useState<{ [id: string]: Placement }>({});
+  const [ads, setAds] = useState<Ad[]>([]);
   const [creatives, setCreatives] = useState<Creative[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [landingPages, setLandingPages] = useState<{ id: string, name: string, url: string }[]>([]);
   
   const [selectedAdvertiser, setSelectedAdvertiser] = useState<Advertiser | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
+  const [selectedAd, setSelectedAd] = useState<Ad | null>(null);
   const [currentView, setCurrentView] = useState<ViewType>('Placements');
   const [isGlobalSearchActive, setIsGlobalSearchActive] = useState<boolean>(false);
   const [isCampaignsLoading, setIsCampaignsLoading] = useState<boolean>(false);
+  const [isAdsLoading, setIsAdsLoading] = useState<boolean>(false);
   const [connectionStatus, setConnectionStatus] = useState<'Connected' | 'Disconnected' | 'Connecting'>('Disconnected');
   
   const [accessToken, setAccessToken] = useState<string | null>(localStorage.getItem('cm360_token'));
@@ -289,6 +298,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
     if (isAuthenticated && accessToken && profileId && selectedCampaign) {
       fetchPlacements(selectedCampaign.id);
+      fetchAds(selectedCampaign.id);
+    } else {
+      setPlacements([]);
+      setPlacementsDrafts({});
+      setAds([]);
+      setSelectedAd(null);
     }
   }, [selectedAdvertiser, selectedCampaign, isAuthenticated, accessToken, profileId]);
 
@@ -636,6 +651,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const placementsToPush = placements.filter(p => placementIds.includes(p.id));
 
+    const getTagFormatsForCompatibility = (compatibility?: string) => {
+      if (compatibility === 'IN_STREAM_VIDEO' || compatibility === 'IN_STREAM_AUDIO') {
+        return ['PLACEMENT_TAG_INSTREAM_VIDEO_PREFETCH'];
+      }
+      return ['PLACEMENT_TAG_STANDARD'];
+    };
+
     for (const p of placementsToPush) {
       try {
         const res = await fetch(`/api/cm360/userprofiles/${profileId}/placements`, {
@@ -653,9 +675,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               width: p.size.includes('x') ? p.size.split('x')[0] : (p.type === 'Video' ? '640' : '300'),
               height: p.size.includes('x') ? p.size.split('x')[1] : (p.type === 'Video' ? '480' : '250')
             },
-            tagFormats: p.type === 'Video' 
-              ? ["PLACEMENT_TAG_INSTREAM_VIDEO_PREFETCH"] 
-              : ["PLACEMENT_TAG_STANDARD", "PLACEMENT_TAG_IFRAME_JAVASCRIPT", "PLACEMENT_TAG_INTERNAL_REDIRECT"],
+            tagFormats: getTagFormatsForCompatibility(p.compatibility),
             paymentSource: 'PLACEMENT_AGENCY_PAID',
             pricingSchedule: {
               pricingType: 'PRICING_TYPE_CPM',
@@ -844,6 +864,59 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const fetchAds = async (campaignId: string, placementId?: string) => {
+    if (!accessToken || !profileId || !campaignId) return;
+    try {
+      setIsAdsLoading(true);
+      const res = await fetch(`/api/cm360/userprofiles/${profileId}/ads?campaignIds=${campaignId}&maxResults=200`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.error('Fetch ads error:', data);
+        setAds([]);
+        return;
+      }
+
+      const mappedAds: Ad[] = (data.ads || []).map((ad: any) => {
+        const placementIds = (ad.placementAssignments || [])
+          .map((pa: any) => pa.placementId)
+          .filter(Boolean);
+        const creativeAssignments = ad.creativeRotation?.creativeAssignments || ad.creativeAssignments || [];
+        const creativeIds = creativeAssignments
+          .map((ca: any) => ca.creativeId)
+          .filter(Boolean);
+        const active = !!ad.active;
+
+        return {
+          id: ad.id,
+          name: ad.name || `Ad_${ad.id}`,
+          campaignId: ad.campaignId,
+          active,
+          status: active ? 'Active' : 'Paused',
+          placementIds,
+          creativeIds,
+          startTime: ad.startTime,
+          endTime: ad.endTime,
+          externalUrl: `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}/campaigns/${ad.campaignId}/explorer/ads/${ad.id}`
+        };
+      });
+
+      const filtered = placementId
+        ? mappedAds.filter(ad => ad.placementIds.includes(placementId))
+        : mappedAds;
+
+      setAds(filtered);
+      setSelectedAd(prev => (prev && filtered.some(ad => ad.id === prev.id)) ? prev : null);
+    } catch (e) {
+      console.error('Fetch ads error:', e);
+      setAds([]);
+    } finally {
+      setIsAdsLoading(false);
+    }
+  };
+
   const updateCreativeStatus = async (creativeIds: string[], active: boolean) => {
     if (!accessToken || !profileId) return { success: 0, failed: creativeIds.length, error: 'No connection' };
     let successCount = 0;
@@ -1021,6 +1094,136 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const assignCreativeToAd = async (creativeId: string, adId: string, campaignId?: string) => {
+    if (!accessToken || !profileId) return { success: false, error: 'No connection' };
+    try {
+      const effectiveCampaignId = campaignId || selectedCampaign?.id;
+      if (!effectiveCampaignId) {
+        return { success: false, error: 'Select a campaign before assigning creative to an Ad.' };
+      }
+
+      const selectedAdData = ads.find((item) => item.id === adId);
+      if (selectedAdData && selectedAdData.campaignId !== effectiveCampaignId) {
+        return { success: false, error: 'Selected Ad does not belong to the active campaign.' };
+      }
+
+      const adRes = await fetch(`/api/cm360/userprofiles/${profileId}/ads/${adId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+
+      const adData = await adRes.json().catch(() => ({}));
+      if (!adRes.ok) {
+        return { success: false, error: adData.error?.message || `Could not load Ad ${adId}` };
+      }
+
+      if (adData.campaignId && adData.campaignId !== effectiveCampaignId) {
+        return { success: false, error: 'Selected Ad belongs to a different campaign.' };
+      }
+
+      const currentAssignments = Array.isArray(adData?.creativeRotation?.creativeAssignments)
+        ? adData.creativeRotation.creativeAssignments
+        : (Array.isArray(adData.creativeAssignments) ? adData.creativeAssignments : []);
+      const normalizedAssignments = currentAssignments
+        .filter((item: any) => !!item?.creativeId)
+        .map((item: any) => ({ ...item, active: item.active !== false }));
+
+      const alreadyAssigned = normalizedAssignments.some((item: any) => String(item.creativeId) === String(creativeId));
+      const nextAssignments = alreadyAssigned
+        ? normalizedAssignments
+        : [...normalizedAssignments, { creativeId, active: true, weight: 1 }];
+
+      const patchPayload = adData?.creativeRotation
+        ? {
+            id: adId,
+            creativeRotation: {
+              ...adData.creativeRotation,
+              creativeAssignments: nextAssignments,
+            },
+          }
+        : {
+            id: adId,
+            creativeAssignments: nextAssignments,
+          };
+
+      const parseErrorText = async (res: Response) => {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const json = await res.json().catch(() => ({}));
+          const detail = json?.error?.errors?.map((e: any) => e?.message).filter(Boolean).join(' | ');
+          return detail || json?.error?.message || `HTTP ${res.status}`;
+        }
+
+        const text = await res.text().catch(() => '');
+        return text || `HTTP ${res.status}: ${res.statusText}`;
+      };
+
+      const patchAttempts: Array<{ body: any; label: string }> = [];
+
+      if (adData?.creativeRotation) {
+        patchAttempts.push({
+          body: patchPayload,
+          label: 'rotation.assignments'
+        });
+        patchAttempts.push({
+          body: {
+            id: adId,
+            creativeRotation: {
+              ...adData.creativeRotation,
+              creativeAssignments: nextAssignments,
+            }
+          },
+          label: 'rotation.full'
+        });
+      }
+
+      patchAttempts.push({
+        body: {
+          id: adId,
+          creativeAssignments: nextAssignments,
+        },
+        label: 'top.assignments'
+      });
+
+      let patchSucceeded = false;
+      const attemptErrors: string[] = [];
+
+      for (const attempt of patchAttempts) {
+        const patchRes = await fetch(`/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(adId)}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(attempt.body)
+        });
+
+        if (patchRes.ok) {
+          patchSucceeded = true;
+          break;
+        }
+
+        const errorText = await parseErrorText(patchRes);
+        attemptErrors.push(`${attempt.label}: ${errorText}`);
+      }
+
+      if (!patchSucceeded) {
+        return {
+          success: false,
+          error: `Failed to assign creative to selected Ad. ${attemptErrors.join(' || ')}`
+        };
+      }
+
+      if (effectiveCampaignId) {
+        await fetchAds(effectiveCampaignId);
+      }
+
+      return { success: true, id: adId };
+    } catch (e: any) {
+      console.error('Assign creative to ad error:', e);
+      return { success: false, error: e.message || 'Network error' };
+    }
+  };
+
   const loginWithToken = async (token: string) => {
     return await handleAuthSuccess(token);
   };
@@ -1029,6 +1232,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setAdvertisers(MOCK_ADVERTISERS);
     setCampaigns(MOCK_CAMPAIGNS);
     setPlacements(MOCK_PLACEMENTS);
+    setAds([]);
     setCreatives(MOCK_CREATIVES);
     setUser({
       name: "AdOps Demo User",
@@ -1054,6 +1258,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setAccessToken(null);
     setProfileId(null);
     setUser(null);
+    setAds([]);
+    setSelectedAd(null);
     setConnectionStatus('Disconnected');
     localStorage.clear();
   };
@@ -1086,6 +1292,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     let failedCount = 0;
     const results: {id: string, success: boolean, error?: string}[] = [];
 
+    const getTagFormatsForCompatibility = (compatibility?: string) => {
+      if (compatibility === 'IN_STREAM_VIDEO' || compatibility === 'IN_STREAM_AUDIO') {
+        return ['PLACEMENT_TAG_INSTREAM_VIDEO_PREFETCH'];
+      }
+      return ['PLACEMENT_TAG_STANDARD'];
+    };
+
     for (const id of placementIds) {
       const draft = placementsDrafts[id];
       if (!draft) continue;
@@ -1115,6 +1328,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             width: draft.size.includes('x') ? draft.size.split('x')[0] : '300',
             height: draft.size.includes('x') ? draft.size.split('x')[1] : '250'
           };
+          body.tagFormats = getTagFormatsForCompatibility(draft.compatibility);
           body.paymentSource = 'PLACEMENT_AGENCY_PAID';
           body.pricingSchedule.pricingType = 'PRICING_TYPE_CPM';
         }
@@ -1170,12 +1384,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   return (
     <AppContext.Provider value={{
-      advertisers, campaigns, campaignsDrafts, placements, placementsDrafts, creatives, sites, landingPages,
-      selectedAdvertiser, selectedCampaign, currentView, isGlobalSearchActive,
-      setSelectedAdvertiser, setSelectedCampaign, setCurrentView, setIsGlobalSearchActive,
+      advertisers, campaigns, campaignsDrafts, placements, placementsDrafts, ads, creatives, sites, landingPages,
+      selectedAdvertiser, selectedCampaign, selectedAd, currentView, isGlobalSearchActive,
+      setSelectedAdvertiser, setSelectedCampaign, setSelectedAd, setCurrentView, setIsGlobalSearchActive,
       addPlacements, updateCampaignDraft, updatePlacement, updatePlacementDraft, updatePlacementName, deletePlacement, publishSelectedDrafts,
       connectionStatus, isAuthenticated, accessToken, profileId, accountId, user, login, loginWithToken, enterDemoMode, logout,
-      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchCreatives, fetchAllCreatives, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, pushCampaigns, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement
+      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchAds, fetchCreatives, fetchAllCreatives, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, pushCampaigns, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement, assignCreativeToAd, isAdsLoading
     }}>
       {children}
     </AppContext.Provider>

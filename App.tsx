@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar';
 import PlacementGrid from './components/PlacementGrid';
 import CreativeGrid from './components/CreativeGrid';
 import CampaignGrid from './components/CampaignGrid';
+import AdGrid from './components/AdGrid';
 import AIHelper from './components/AIHelper';
 import Login from './components/Login';
 import { ChevronRight, LogOut } from 'lucide-react';
@@ -77,6 +78,8 @@ const MainContent: React.FC = () => {
         return <CampaignGrid />;
       case 'Creatives':
         return <CreativeGrid />;
+      case 'Ads':
+        return <AdGrid />;
       default:
         return (
           <div className="flex items-center justify-center h-full text-slate-600 italic font-mono text-xs uppercase tracking-tighter">

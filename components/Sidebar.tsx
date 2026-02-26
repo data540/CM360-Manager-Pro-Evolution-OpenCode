@@ -6,6 +6,7 @@ import {
   LayoutDashboard, 
   Layers, 
   Image as ImageIcon, 
+  Megaphone,
   Cpu, 
   Settings as SettingsIcon,
   ChevronDown,
@@ -103,6 +104,7 @@ const Sidebar: React.FC = () => {
   const navItems: { type: ViewType; icon: any; label: string }[] = [
     { type: 'Campaigns', icon: LayoutDashboard, label: 'Campaigns' },
     { type: 'Placements', icon: Layers, label: 'Placements' },
+    { type: 'Ads', icon: Megaphone, label: 'Ads' },
     { type: 'Creatives', icon: ImageIcon, label: 'Creatives' },
     { type: 'AIHelper', icon: Cpu, label: 'AI Helper' },
     { type: 'Settings', icon: SettingsIcon, label: 'Settings' },
