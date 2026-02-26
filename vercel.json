@@ -4,6 +4,18 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/cm360/:path*",
+      "destination": "https://dfareporting.googleapis.com/dfareporting/v4/:path*"
+    },
+    {
+      "source": "/api/cm360-upload/:path*",
+      "destination": "https://dfareporting.googleapis.com/:path*"
+    },
+    {
+      "source": "/api/google/:path*",
+      "destination": "https://www.googleapis.com/:path*"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
