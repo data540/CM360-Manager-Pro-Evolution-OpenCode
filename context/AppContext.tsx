@@ -77,6 +77,25 @@ const DEFAULT_CLIENT_ID = "547547481261-0o6coge0fufp839q33ekv7hk1930m7o1.apps.go
 const CM360_SCOPES = "https://www.googleapis.com/auth/dfareporting https://www.googleapis.com/auth/dfatrafficking openid https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email";
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const getLocalStorageItem = (key: string): string | null => {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+
+  const getStoredUser = (): UserProfile | null => {
+    const saved = getLocalStorageItem('cm360_user');
+    if (!saved) return null;
+    try {
+      return JSON.parse(saved);
+    } catch {
+      localStorage.removeItem('cm360_user');
+      return null;
+    }
+  };
+
   const [advertisers, setAdvertisers] = useState<Advertiser[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campaignsDrafts, setCampaignsDrafts] = useState<{ [id: string]: Partial<Campaign> & { isDraft?: boolean } }>({});
@@ -96,14 +115,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [isAdsLoading, setIsAdsLoading] = useState<boolean>(false);
   const [connectionStatus, setConnectionStatus] = useState<'Connected' | 'Disconnected' | 'Connecting'>('Disconnected');
   
-  const [accessToken, setAccessToken] = useState<string | null>(localStorage.getItem('cm360_token'));
-  const [profileId, setProfileId] = useState<string | null>(localStorage.getItem('cm360_profile_id'));
-  const [accountId, setAccountId] = useState<string | null>(localStorage.getItem('cm360_account_id'));
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!localStorage.getItem('cm360_token'));
-  const [user, setUser] = useState<UserProfile | null>(() => {
-    const saved = localStorage.getItem('cm360_user');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [accessToken, setAccessToken] = useState<string | null>(getLocalStorageItem('cm360_token'));
+  const [profileId, setProfileId] = useState<string | null>(getLocalStorageItem('cm360_profile_id'));
+  const [accountId, setAccountId] = useState<string | null>(getLocalStorageItem('cm360_account_id'));
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!getLocalStorageItem('cm360_token'));
+  const [user, setUser] = useState<UserProfile | null>(() => getStoredUser());
 
   const [tokenClient, setTokenClient] = useState<any>(null);
 
