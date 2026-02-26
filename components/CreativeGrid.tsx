@@ -63,7 +63,8 @@ const CreativeGrid: React.FC = () => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isNewMenuOpen, setIsNewMenuOpen] = useState(false);
-  const [selectedCreatives, setSelectedCreatives] = useState<string[]>([]);
+  const [selectedCreatives, setSelectedCreatives] = useState<Set<string>>(new Set());
+  const [bulkAssignAdId, setBulkAssignAdId] = useState('');
   const [isSelectAll, setIsSelectAll] = useState(false);
   
   // Naming Convention States
@@ -636,6 +637,106 @@ const CreativeGrid: React.FC = () => {
     setLoading(false);
   };
 
+  const toggleSelectCreative = (creativeId: string) => {
+    setSelectedCreatives((prev) => {
+      const next = new Set(prev);
+      if (next.has(creativeId)) next.delete(creativeId);
+      else next.add(creativeId);
+      return next;
+    });
+  };
+
+  const toggleSelectAllCreatives = () => {
+    if (filteredCreatives.length === 0) return;
+    setSelectedCreatives((prev) => {
+      if (prev.size === filteredCreatives.length) return new Set();
+      return new Set(filteredCreatives.map((creative) => creative.id));
+    });
+  };
+
+  const handleAssignSelectedToAd = async () => {
+    if (selectedCreatives.size === 0) return;
+    if (!selectedCampaign) {
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'Campaign required',
+        details: 'Select a campaign before assigning creatives to an Ad.'
+      });
+      return;
+    }
+
+    if (!bulkAssignAdId) {
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'Ad required',
+        details: 'Choose a target Ad for selected creatives.'
+      });
+      return;
+    }
+
+    const selectedAd = campaignAds.find((ad) => ad.id === bulkAssignAdId);
+    if (!selectedAd) {
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'Invalid Ad selection',
+        details: 'The selected Ad is not available in the active campaign.'
+      });
+      return;
+    }
+
+    if (isDefaultAd(selectedAd)) {
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'Default Ad cannot be selected',
+        details: 'Choose a non-default Ad to assign selected creatives.'
+      });
+      return;
+    }
+
+    const selectedIds = Array.from(selectedCreatives);
+    setToast({
+      show: true,
+      type: 'loading',
+      message: `Assigning ${selectedIds.length} creatives...`,
+      details: `Target Ad: ${selectedAd.name}`
+    });
+
+    let successCount = 0;
+    let failCount = 0;
+    let firstError = '';
+
+    for (const creativeId of selectedIds) {
+      const result = await assignCreativeToAd(creativeId, bulkAssignAdId, selectedCampaign.id);
+      if (result.success) {
+        successCount++;
+      } else {
+        failCount++;
+        if (!firstError) firstError = result.error || 'Unknown assignment error';
+      }
+    }
+
+    if (failCount === 0) {
+      setToast({
+        show: true,
+        type: 'success',
+        message: 'Assignment complete',
+        details: `${successCount} creatives assigned to ${selectedAd.name}.`
+      });
+      setSelectedCreatives(new Set());
+    } else {
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'Partial assignment failure',
+        details: `${successCount} assigned, ${failCount} failed. First error: ${firstError}`
+      });
+    }
+  };
+
   const handleAssign = async () => {
     if (!creativeToAssign || !destAdvertiserId) return;
     setIsAssigning(true);
@@ -744,6 +845,30 @@ const CreativeGrid: React.FC = () => {
         </div>
         
         <div className="flex items-center gap-2">
+          {viewMode === 'list' && selectedCreatives.size > 0 && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600/10 border border-blue-500/20 mr-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400">{selectedCreatives.size} selected</span>
+              <select
+                value={bulkAssignAdId}
+                onChange={(e) => setBulkAssignAdId(e.target.value)}
+                className="bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-[10px] text-slate-200 min-w-[200px]"
+              >
+                <option value="">Select Ad...</option>
+                {campaignAds.map((ad) => (
+                  <option key={ad.id} value={ad.id} disabled={isDefaultAd(ad)}>
+                    {isDefaultAd(ad) ? `[DEFAULT - LOCKED] ${ad.name}` : ad.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={handleAssignSelectedToAd}
+                className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold transition-all"
+              >
+                Assign to Ad
+              </button>
+            </div>
+          )}
+
           <div className="flex p-1 bg-slate-950 rounded-lg border border-slate-800 mr-2">
             <button 
               onClick={() => setViewMode('grid')}
@@ -1057,6 +1182,14 @@ const CreativeGrid: React.FC = () => {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-900 border-b border-slate-800">
+                  <th className="p-4 w-12">
+                    <input
+                      type="checkbox"
+                      className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-blue-500/20 w-4 h-4 cursor-pointer"
+                      checked={filteredCreatives.length > 0 && selectedCreatives.size === filteredCreatives.length}
+                      onChange={toggleSelectAllCreatives}
+                    />
+                  </th>
                   <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Preview</th>
                   <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Name</th>
                   <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Type</th>
@@ -1068,6 +1201,14 @@ const CreativeGrid: React.FC = () => {
               <tbody className="divide-y divide-slate-800/50">
                 {filteredCreatives.map((creative) => (
                   <tr key={creative.id} className="group hover:bg-blue-600/[0.03] transition-colors">
+                    <td className="p-4">
+                      <input
+                        type="checkbox"
+                        className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-blue-500/20 w-4 h-4 cursor-pointer"
+                        checked={selectedCreatives.has(creative.id)}
+                        onChange={() => toggleSelectCreative(creative.id)}
+                      />
+                    </td>
                     <td className="p-4">
                       <div className="w-10 h-10 bg-slate-950 rounded-lg border border-slate-800 overflow-hidden flex items-center justify-center">
                         {creative.thumbnailUrl ? (
