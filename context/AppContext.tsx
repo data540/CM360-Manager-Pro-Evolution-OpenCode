@@ -91,7 +91,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       return JSON.parse(saved);
     } catch {
-      localStorage.removeItem('cm360_user');
+      try {
+        localStorage.removeItem('cm360_user');
+      } catch {
+        // ignore storage cleanup errors
+      }
       return null;
     }
   };

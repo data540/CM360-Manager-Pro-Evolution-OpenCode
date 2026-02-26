@@ -10,6 +10,38 @@ import AIHelper from './components/AIHelper';
 import Login from './components/Login';
 import { ChevronRight, LogOut } from 'lucide-react';
 
+class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: string }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: '' };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error: error?.message || 'Unknown runtime error' };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('Root runtime error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex items-center justify-center p-6">
+          <div className="max-w-2xl w-full bg-slate-900 border border-rose-500/30 rounded-2xl p-6">
+            <p className="text-[10px] uppercase tracking-widest text-rose-400 font-bold">Runtime Error</p>
+            <h2 className="text-lg font-bold text-white mt-2">The app failed to render.</h2>
+            <p className="text-xs text-slate-300 mt-3 font-mono break-all">{this.state.error}</p>
+            <p className="text-xs text-slate-500 mt-4">Open browser console (F12) and share the first red error line.</p>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 const Header: React.FC = () => {
   const { selectedAdvertiser, selectedCampaign, currentView, user, logout, profileId } = useApp();
 
@@ -116,9 +148,11 @@ const AppShell: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <AppProvider>
-      <AppShell />
-    </AppProvider>
+    <RootErrorBoundary>
+      <AppProvider>
+        <AppShell />
+      </AppProvider>
+    </RootErrorBoundary>
   );
 };
 
