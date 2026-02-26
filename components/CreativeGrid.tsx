@@ -89,7 +89,7 @@ const CreativeGrid: React.FC = () => {
   const [selectedFormat, setSelectedFormat] = useState('Display');
   const [selectedSize, setSelectedSize] = useState('');
   const [uploadAdId, setUploadAdId] = useState('');
-  const [autoAssignBySize, setAutoAssignBySize] = useState(true);
+  const [batchAssignmentMode, setBatchAssignmentMode] = useState<'auto' | 'single' | 'none'>('auto');
   const [batchPlans, setBatchPlans] = useState<Array<{
     file: File;
     finalSize: string;
@@ -227,9 +227,6 @@ const CreativeGrid: React.FC = () => {
         assignmentReason = 'manual_required';
       } else if (adsForSize.length > 0) {
         assignmentReason = 'default_only_unselectable';
-      } else if (uploadAdId) {
-        selectedAdId = uploadAdId;
-        assignmentReason = 'fallback_selected_ad';
       }
 
       plans.push({
@@ -291,14 +288,18 @@ const CreativeGrid: React.FC = () => {
       if (result.success) {
         successCount++;
 
-        const adToAssign = autoAssignBySize ? plan.selectedAdId : uploadAdId;
+        const adToAssign = batchAssignmentMode === 'auto'
+          ? plan.selectedAdId
+          : batchAssignmentMode === 'single'
+            ? uploadAdId
+            : null;
         if (adToAssign && result.id) {
           const assignResult = await assignCreativeToAd(result.id, adToAssign, selectedCampaign?.id);
           if (!assignResult.success) {
             assignFailCount++;
             if (!firstAssignError) firstAssignError = assignResult.error || 'Unknown assignment error';
           }
-        } else if (autoAssignBySize) {
+        } else if (batchAssignmentMode === 'auto') {
           assignFailCount++;
           if (!firstAssignError) {
             if (plan.assignmentReason === 'default_only_unselectable') {
@@ -324,7 +325,9 @@ const CreativeGrid: React.FC = () => {
         show: true,
         type: 'success',
         message: 'Batch Upload Complete!',
-        details: `Successfully uploaded and assigned ${successCount} creatives to CM360 Ads.`,
+        details: batchAssignmentMode === 'none'
+          ? `Successfully uploaded ${successCount} creatives (no Ad assignment).`
+          : `Successfully uploaded and assigned ${successCount} creatives to CM360 Ads.`,
         link: `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}/advertisers/${selectedAdvertiser.id}/creatives`
       });
     } else {
@@ -351,6 +354,7 @@ const CreativeGrid: React.FC = () => {
       setSelectedFormat('Display');
       setSelectedSize(CREATIVE_SPECS['Display'][0]);
       setUploadAdId('');
+      setBatchAssignmentMode('auto');
       setIsUploadModalOpen(true);
     } else {
       const file = files[0];
@@ -390,12 +394,15 @@ const CreativeGrid: React.FC = () => {
   const confirmUpload = async () => {
     if ((!pendingFile && pendingFiles.length === 0) || !selectedAdvertiser) return;
 
-    if (uploadAdId && !selectedCampaign) {
+    const isBatch = pendingFiles.length > 0;
+    const assignmentRequiresCampaign = isBatch ? batchAssignmentMode !== 'none' : !!uploadAdId;
+
+    if (assignmentRequiresCampaign && !selectedCampaign) {
       setToast({
         show: true,
         type: 'error',
         message: 'Campaign required',
-        details: 'Select a campaign before assigning uploads to an Ad.'
+        details: 'Select a campaign before assigning creatives to an Ad.'
       });
       return;
     }
@@ -420,8 +427,18 @@ const CreativeGrid: React.FC = () => {
       return;
     }
 
+    if (isBatch && batchAssignmentMode === 'single' && !uploadAdId) {
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'Ad required',
+        details: 'Select a target Ad for "Assign all to one Ad" mode.'
+      });
+      return;
+    }
+
     if (pendingFiles.length > 0) {
-      if (autoAssignBySize) {
+      if (batchAssignmentMode === 'auto') {
         const plans = await resolveBatchPlans(pendingFiles);
         setBatchPlans(plans);
         const firstManualIndex = plans.findIndex((plan) => plan.candidateAds.filter((ad) => !isDefaultAd(ad)).length > 1 && !plan.selectedAdId);
@@ -432,7 +449,7 @@ const CreativeGrid: React.FC = () => {
         }
 
         await startBatchUpload(plans);
-      } else {
+      } else if (batchAssignmentMode === 'single') {
         const plans = pendingFiles.map((file) => ({
           file,
           finalSize: normalizeSize(selectedSize) || '300x250',
@@ -442,6 +459,18 @@ const CreativeGrid: React.FC = () => {
           candidateAds: [],
           selectedAdId: uploadAdId || null,
           assignmentReason: uploadAdId ? 'manual_selected_ad' : 'no_assignment',
+        }));
+        await startBatchUpload(plans);
+      } else {
+        const plans = pendingFiles.map((file) => ({
+          file,
+          finalSize: normalizeSize(selectedSize) || '300x250',
+          sizeFromName: normalizeSize(extractSizeFromName(file.name)),
+          sizeFromFile: null,
+          mismatch: false,
+          candidateAds: [],
+          selectedAdId: null,
+          assignmentReason: 'no_assignment',
         }));
         await startBatchUpload(plans);
       }
@@ -493,34 +522,6 @@ const CreativeGrid: React.FC = () => {
       }
       setPendingFile(null);
     }
-  };
-
-  const handleAutoMatchAndUpload = async () => {
-    if (!selectedAdvertiser || pendingFiles.length === 0) return;
-    if (!selectedCampaign) {
-      setToast({
-        show: true,
-        type: 'error',
-        message: 'Campaign required',
-        details: 'Select advertiser and campaign before auto-matching Ads by size.'
-      });
-      return;
-    }
-
-    const plans = await resolveBatchPlans(pendingFiles);
-    setBatchPlans(plans);
-
-    const firstManualIndex = plans.findIndex((plan) => {
-      const selectable = plan.candidateAds.filter((ad) => !isDefaultAd(ad));
-      return selectable.length > 1 && !plan.selectedAdId;
-    });
-
-    if (firstManualIndex >= 0) {
-      setManualPlanIndex(firstManualIndex);
-      return;
-    }
-
-    await startBatchUpload(plans);
   };
 
   const handlePermissionsCheck = async () => {
@@ -910,7 +911,7 @@ const CreativeGrid: React.FC = () => {
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:grayscale"
           >
             <UploadCloud className="w-4 h-4" />
-            Bulk Create
+            Batch Upload
           </button>
 
           <div className="relative">
@@ -932,17 +933,6 @@ const CreativeGrid: React.FC = () => {
                     <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-2">Creative</span>
                   </div>
                   <div className="p-1">
-                    <button 
-                      disabled={!selectedAdvertiser}
-                      onClick={() => {
-                        const input = document.getElementById('batch-upload-input');
-                        input?.click();
-                      }}
-                      className="w-full flex items-center gap-3 px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white rounded-lg transition-colors group disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <UploadCloud className="w-4 h-4 text-slate-500 group-hover:text-white" />
-                      Batch upload
-                    </button>
                     <button 
                       onClick={() => {
                         setIsGlobalSearchActive(!isGlobalSearchActive);
@@ -1490,23 +1480,36 @@ const CreativeGrid: React.FC = () => {
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-[10px] uppercase font-bold text-slate-500">Assign to Ad (optional)</label>
-                  {pendingFiles.length > 1 && (
-                    <label className="flex items-center gap-2 text-[10px] font-bold text-slate-400 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={autoAssignBySize}
-                        onChange={(e) => setAutoAssignBySize(e.target.checked)}
-                        className="accent-blue-500"
-                      />
-                      Auto by size
-                    </label>
-                  )}
+                  <label className="block text-[10px] uppercase font-bold text-slate-500">Ad Assignment</label>
                 </div>
+
+                {pendingFiles.length > 1 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                    <button
+                      onClick={() => setBatchAssignmentMode('auto')}
+                      className={`py-2 rounded-lg text-[10px] font-bold border transition-all ${batchAssignmentMode === 'auto' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'}`}
+                    >
+                      Auto-match by size
+                    </button>
+                    <button
+                      onClick={() => setBatchAssignmentMode('single')}
+                      className={`py-2 rounded-lg text-[10px] font-bold border transition-all ${batchAssignmentMode === 'single' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'}`}
+                    >
+                      Assign all to one Ad
+                    </button>
+                    <button
+                      onClick={() => setBatchAssignmentMode('none')}
+                      className={`py-2 rounded-lg text-[10px] font-bold border transition-all ${batchAssignmentMode === 'none' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'}`}
+                    >
+                      Upload only
+                    </button>
+                  </div>
+                )}
+
                 <select
                   value={uploadAdId}
                   onChange={(e) => setUploadAdId(e.target.value)}
-                  disabled={!selectedCampaign}
+                  disabled={!selectedCampaign || (pendingFiles.length > 1 && batchAssignmentMode !== 'single')}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all disabled:opacity-50"
                 >
                   <option value="">No ad assignment</option>
@@ -1519,8 +1522,14 @@ const CreativeGrid: React.FC = () => {
                 {!selectedCampaign && (
                   <p className="text-[10px] text-slate-500 mt-2">Select a campaign first to load Ads from CM360.</p>
                 )}
-                {pendingFiles.length > 1 && autoAssignBySize && selectedCampaign && (
+                {pendingFiles.length > 1 && batchAssignmentMode === 'auto' && selectedCampaign && (
                   <p className="text-[10px] text-blue-400 mt-2">For batch uploads, Ad will be auto-matched by detected size (filename + file dimensions). If multiple Ads share the same size, manual selection is required per file.</p>
+                )}
+                {pendingFiles.length > 1 && batchAssignmentMode === 'single' && (
+                  <p className="text-[10px] text-slate-400 mt-2">All creatives in this batch will be assigned to the selected Ad.</p>
+                )}
+                {pendingFiles.length > 1 && batchAssignmentMode === 'none' && (
+                  <p className="text-[10px] text-slate-400 mt-2">Creatives will be uploaded without Ad assignment.</p>
                 )}
               </div>
 
@@ -1553,14 +1562,6 @@ const CreativeGrid: React.FC = () => {
                 >
                   Check CM360 Permissions
                 </button>
-                {pendingFiles.length > 1 && autoAssignBySize && (
-                  <button
-                    onClick={handleAutoMatchAndUpload}
-                    className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-emerald-600/20"
-                  >
-                    Auto-match & Upload
-                  </button>
-                )}
                 <button 
                   onClick={confirmUpload}
                   className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20"

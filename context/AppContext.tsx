@@ -1148,9 +1148,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         .map((item: any) => ({ ...item, active: item.active !== false }));
 
       const alreadyAssigned = normalizedAssignments.some((item: any) => String(item.creativeId) === String(creativeId));
+
+      const buildNewAssignmentFromTemplate = () => {
+        const template = normalizedAssignments[0] || {};
+        const nextAssignment: any = {
+          ...template,
+          creativeId,
+          active: true,
+        };
+
+        // These fields are output-only or can collide when duplicating assignment entries.
+        delete nextAssignment.id;
+        delete nextAssignment.assignmentId;
+        delete nextAssignment.kind;
+        delete nextAssignment.startTime;
+        delete nextAssignment.endTime;
+
+        if (!nextAssignment.weight) nextAssignment.weight = 1;
+        return nextAssignment;
+      };
+
       const nextAssignments = alreadyAssigned
         ? normalizedAssignments
-        : [...normalizedAssignments, { creativeId, active: true, weight: 1 }];
+        : [...normalizedAssignments, buildNewAssignmentFromTemplate()];
 
       const patchPayload = adData?.creativeRotation
         ? {
@@ -1177,14 +1197,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return text || `HTTP ${res.status}: ${res.statusText}`;
       };
 
-      const patchAttempts: Array<{ body: any; label: string }> = [];
+      const patchAttempts: Array<{ method: 'PATCH' | 'PUT'; body: any; label: string }> = [];
 
       if (adData?.creativeRotation) {
         patchAttempts.push({
+          method: 'PATCH',
           body: patchPayload,
           label: 'rotation.assignments'
         });
         patchAttempts.push({
+          method: 'PATCH',
           body: {
             id: adId,
             creativeRotation: {
@@ -1194,14 +1216,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           },
           label: 'rotation.full'
         });
+        patchAttempts.push({
+          method: 'PUT',
+          body: {
+            ...adData,
+            id: adId,
+            creativeRotation: {
+              ...adData.creativeRotation,
+              creativeAssignments: nextAssignments,
+            },
+          },
+          label: 'rotation.full.update'
+        });
       }
 
       patchAttempts.push({
+        method: 'PATCH',
         body: {
           id: adId,
           creativeAssignments: nextAssignments,
         },
         label: 'top.assignments'
+      });
+      patchAttempts.push({
+        method: 'PUT',
+        body: {
+          ...adData,
+          id: adId,
+          creativeAssignments: nextAssignments,
+        },
+        label: 'top.assignments.update'
       });
 
       let patchSucceeded = false;
@@ -1209,7 +1253,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       for (const attempt of patchAttempts) {
         const patchRes = await fetch(`/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(adId)}`, {
-          method: 'PATCH',
+          method: attempt.method,
           headers: {
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json'
