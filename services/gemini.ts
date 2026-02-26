@@ -1,12 +1,24 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Fix: Initializing GoogleGenAI correctly using named parameter and process.env.API_KEY directly.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+let ai: GoogleGenAI | null = null;
+
+const getAiClient = () => {
+  if (ai) return ai;
+
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is missing");
+  }
+
+  ai = new GoogleGenAI({ apiKey });
+  return ai;
+};
 
 export const getAdOpsAssistantResponse = async (prompt: string, history: { role: 'user' | 'model', parts: { text: string }[] }[]) => {
   try {
-    const response = await ai.models.generateContent({
+    const client = getAiClient();
+    const response = await client.models.generateContent({
       model: 'gemini-3-flash-preview',
       // Fix: Structured contents for the multi-turn conversation.
       contents: [
@@ -26,7 +38,7 @@ export const getAdOpsAssistantResponse = async (prompt: string, history: { role:
     return response.text;
   } catch (error) {
     console.error("Gemini Error:", error);
-    return "I'm having trouble connecting to my reasoning core. Please try again or check your API configuration.";
+    return "AI helper is unavailable. Configure GEMINI_API_KEY in your environment and redeploy.";
   }
 };
 
@@ -37,7 +49,8 @@ export const normalizeNamingRules = async (names: string[]) => {
   Names: ${names.join(', ')}`;
 
   try {
-    const response = await ai.models.generateContent({
+    const client = getAiClient();
+    const response = await client.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
     });
