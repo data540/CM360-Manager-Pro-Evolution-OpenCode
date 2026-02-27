@@ -17,6 +17,7 @@ export interface Campaign {
   objective: string;
   updatedAt: string;
   isEuPolitical?: boolean;
+  landingPageId?: string;
   landingPageUrl?: string;
   isDraft?: boolean;
   originalData?: Partial<Campaign>;

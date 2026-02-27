@@ -40,7 +40,7 @@ const Sidebar: React.FC = () => {
   const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
   const [newCampaignName, setNewCampaignName] = useState('');
   const [isEuPolitical, setIsEuPolitical] = useState(false);
-  const [selectedLandingPageUrl, setSelectedLandingPageUrl] = useState('');
+  const [selectedLandingPageId, setSelectedLandingPageId] = useState('');
   const [customLandingPageUrl, setCustomLandingPageUrl] = useState('');
   const [isCustomLandingPage, setIsCustomLandingPage] = useState(false);
 
@@ -50,6 +50,8 @@ const Sidebar: React.FC = () => {
   React.useEffect(() => {
     const handleOpenModal = () => {
       setIsCampaignModalOpen(true);
+      setSelectedLandingPageId('');
+      setCustomLandingPageUrl('');
       if (selectedAdvertiser) fetchLandingPages(selectedAdvertiser.id);
     };
     window.addEventListener('open-campaign-modal', handleOpenModal);
@@ -77,7 +79,8 @@ const Sidebar: React.FC = () => {
       startDate: new Date().toISOString().split('T')[0],
       endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       isEuPolitical,
-      landingPageUrl: isCustomLandingPage ? customLandingPageUrl : selectedLandingPageUrl
+      landingPageId: isCustomLandingPage ? undefined : selectedLandingPageId,
+      landingPageUrl: isCustomLandingPage ? customLandingPageUrl : undefined
     });
     
     if (result.success) {
@@ -179,6 +182,8 @@ const Sidebar: React.FC = () => {
                 <button 
                   onClick={() => {
                     setIsCampaignModalOpen(true);
+                    setSelectedLandingPageId('');
+                    setCustomLandingPageUrl('');
                     if (selectedAdvertiser) fetchLandingPages(selectedAdvertiser.id);
                   }}
                   className="text-[9px] text-blue-400 hover:text-blue-300 flex items-center gap-1"
@@ -344,12 +349,12 @@ const Sidebar: React.FC = () => {
                   <div className="relative">
                     <select 
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all appearance-none"
-                      value={selectedLandingPageUrl}
-                      onChange={(e) => setSelectedLandingPageUrl(e.target.value)}
+                      value={selectedLandingPageId}
+                      onChange={(e) => setSelectedLandingPageId(e.target.value)}
                     >
                       <option value="">{landingPages.length > 0 ? 'Select a landing page...' : 'No landing pages found'}</option>
                       {landingPages.map(lp => (
-                        <option key={lp.id} value={lp.url}>{lp.name} ({lp.url})</option>
+                        <option key={lp.id} value={lp.id}>{lp.name} ({lp.url})</option>
                       ))}
                     </select>
                     <ChevronDown className="absolute right-4 top-3.5 w-4 h-4 text-slate-500 pointer-events-none" />
@@ -366,7 +371,7 @@ const Sidebar: React.FC = () => {
                 </button>
                 <button 
                   onClick={handleCreateCampaign}
-                  disabled={!newCampaignName || (isCustomLandingPage ? !customLandingPageUrl : !selectedLandingPageUrl) || (toast.type === 'loading' && toast.show)}
+                  disabled={!newCampaignName || (isCustomLandingPage ? !customLandingPageUrl : !selectedLandingPageId) || (toast.type === 'loading' && toast.show)}
                   className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20 disabled:opacity-50"
                 >
                   {toast.type === 'loading' && toast.show ? <RefreshCw className="w-4 h-4 animate-spin mx-auto" /> : 'Create Campaign'}

@@ -504,13 +504,42 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const createCampaign = async (campaignData: Partial<Campaign>) => {
     if (!accessToken || !profileId || !selectedAdvertiser) return { success: false, error: 'No connection' };
     try {
+      let landingPageId = campaignData.landingPageId;
+
+      if (!landingPageId && campaignData.landingPageUrl) {
+        const landingPagePayload = {
+          advertiserId: selectedAdvertiser.id,
+          name: `LP_${campaignData.name || 'Campaign'}_${Date.now()}`,
+          url: campaignData.landingPageUrl,
+        };
+
+        const lpRes = await fetch(`/api/cm360/userprofiles/${profileId}/advertiserLandingPages`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(landingPagePayload)
+        });
+
+        const lpData = await lpRes.json().catch(() => ({}));
+        if (!lpRes.ok || !lpData?.id) {
+          return { success: false, error: lpData?.error?.message || 'Could not create landing page for campaign.' };
+        }
+
+        landingPageId = lpData.id;
+      }
+
+      if (!landingPageId) {
+        return { success: false, error: 'Campaign requires at least one landing page. Select or create one before saving.' };
+      }
+
       const body: any = {
         advertiserId: selectedAdvertiser.id,
         name: campaignData.name,
         startDate: campaignData.startDate,
         endDate: campaignData.endDate,
-        defaultLandingPageName: campaignData.landingPageUrl ? 'Campaign Landing Page' : 'Default Landing Page',
-        defaultLandingPageUrl: campaignData.landingPageUrl || 'https://www.aireuropa.com'
+        defaultLandingPageId: landingPageId,
       };
 
       // EU Political Ads Declaration
