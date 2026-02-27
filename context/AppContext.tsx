@@ -68,6 +68,7 @@ interface AppContextType {
   copyCreative: (creativeId: string, destinationAdvertiserId: string) => Promise<{success: boolean, id?: string, error?: string}>;
   assignCreativeToPlacement: (creativeId: string, placementId: string, campaignId: string) => Promise<{success: boolean, id?: string, error?: string}>;
   assignCreativeToAd: (creativeId: string, adId: string, campaignId?: string, mode?: 'add' | 'replace') => Promise<{success: boolean, id?: string, error?: string}>;
+  unassignCreativeFromAd: (creativeId: string, adId: string, campaignId?: string) => Promise<{success: boolean, error?: string}>;
   isAdsLoading: boolean;
 }
 
@@ -1402,6 +1403,67 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const unassignCreativeFromAd = async (creativeId: string, adId: string, campaignId?: string) => {
+    if (!accessToken || !profileId) return { success: false, error: 'No connection' };
+    try {
+      const effectiveCampaignId = campaignId || selectedCampaign?.id;
+      if (!effectiveCampaignId) {
+        return { success: false, error: 'Select a campaign before unassigning creative from an Ad.' };
+      }
+
+      const adRes = await fetch(`/api/cm360/userprofiles/${profileId}/ads/${adId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const adData = await adRes.json().catch(() => ({}));
+      if (!adRes.ok) {
+        return { success: false, error: adData.error?.message || `Could not load Ad ${adId}` };
+      }
+
+      const currentAssignments = Array.isArray(adData?.creativeRotation?.creativeAssignments)
+        ? adData.creativeRotation.creativeAssignments
+        : (Array.isArray(adData.creativeAssignments) ? adData.creativeAssignments : []);
+
+      const nextAssignments = currentAssignments.filter((item: any) => String(item?.creativeId) !== String(creativeId));
+
+      if (nextAssignments.length === currentAssignments.length) {
+        return { success: true };
+      }
+
+      const body = adData?.creativeRotation
+        ? {
+            id: adId,
+            creativeRotation: {
+              ...adData.creativeRotation,
+              creativeAssignments: nextAssignments,
+            }
+          }
+        : {
+            id: adId,
+            creativeAssignments: nextAssignments,
+          };
+
+      const res = await fetch(`/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(adId)}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { success: false, error: data?.error?.message || `Unassign failed (${res.status})` };
+      }
+
+      await fetchAds(effectiveCampaignId);
+      return { success: true };
+    } catch (e: any) {
+      console.error('Unassign creative from ad error:', e);
+      return { success: false, error: e.message || 'Network error' };
+    }
+  };
+
   const loginWithToken = async (token: string) => {
     return await handleAuthSuccess(token);
   };
@@ -1574,7 +1636,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setSelectedAdvertiser, setSelectedCampaign, setSelectedAd, setCurrentView, setIsGlobalSearchActive,
       addPlacements, updateCampaignDraft, updatePlacement, updatePlacementDraft, updatePlacementName, deletePlacement, publishSelectedDrafts,
       connectionStatus, isAuthenticated, accessToken, profileId, accountId, user, login, loginWithToken, enterDemoMode, logout,
-      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchAds, fetchCreatives, fetchAllCreatives, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, pushCampaigns, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement, assignCreativeToAd, isAdsLoading
+      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchAds, fetchCreatives, fetchAllCreatives, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, pushCampaigns, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement, assignCreativeToAd, unassignCreativeFromAd, isAdsLoading
     }}>
       {children}
     </AppContext.Provider>

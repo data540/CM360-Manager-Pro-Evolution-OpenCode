@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Ad, Creative } from '../types';
-import { CM360_ERROR_MAPPING } from '../constants';
+import { CM360_ERROR_MAPPING, NAMING_TAXONOMY } from '../constants';
 import { 
   Search, 
   Filter, 
@@ -57,7 +57,7 @@ const CreativeGrid: React.FC = () => {
     assignCreativeToAd
   } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [loading, setLoading] = useState(false);
   const [activeActionMenu, setActiveActionMenu] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -89,6 +89,7 @@ const CreativeGrid: React.FC = () => {
   const [customName, setCustomName] = useState('');
   const [selectedFormat, setSelectedFormat] = useState('Display');
   const [selectedSize, setSelectedSize] = useState('');
+  const [selectedTech, setSelectedTech] = useState((NAMING_TAXONOMY.Tech[0] || 'dv360').toUpperCase());
   const [uploadAdId, setUploadAdId] = useState('');
   const [uploadAssignMode, setUploadAssignMode] = useState<'add' | 'replace'>('add');
   const [batchAssignmentMode, setBatchAssignmentMode] = useState<'auto' | 'single' | 'none'>('auto');
@@ -157,6 +158,7 @@ const CreativeGrid: React.FC = () => {
   };
   
   const CREATIVE_FORMATS = Object.keys(CREATIVE_SPECS);
+  const TECH_OPTIONS = NAMING_TAXONOMY.Tech.map((tech) => tech.toUpperCase());
   
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'loading', message: string, details?: string, link?: string}>({
     show: false,
@@ -279,6 +281,7 @@ const CreativeGrid: React.FC = () => {
     setManualPlanIndex(null);
     const campaignPrefix = selectedCampaign ? `${selectedCampaign.name.substring(0, 10)}_` : '';
     const dateStr = includeDate ? `_${new Date().toLocaleDateString('es-ES').replace(/\//g, '-')}` : '';
+    const techToken = (selectedTech || 'DV360').trim().toUpperCase();
 
     setBatchProgress({ current: 0, total: plans.length, status: 'Starting batch upload...' });
 
@@ -294,7 +297,7 @@ const CreativeGrid: React.FC = () => {
         ? `${namingText}_${baseName}${dateStr}`
         : `${baseName}_${namingText}${dateStr}`;
 
-      const finalName = `${campaignPrefix}${nameWithConvention}_${selectedFormat}_${plan.finalSize.replace(/\s+/g, '_')}`;
+      const finalName = `${campaignPrefix}${nameWithConvention}_${techToken}_${selectedFormat}_${plan.finalSize.replace(/\s+/g, '_')}`;
 
       setBatchProgress({
         current: i + 1,
@@ -378,6 +381,7 @@ const CreativeGrid: React.FC = () => {
       setCustomName('Batch_Upload');
       setSelectedFormat('Display');
       setSelectedSize(CREATIVE_SPECS['Display'][0]);
+      setSelectedTech((NAMING_TAXONOMY.Tech[0] || 'dv360').toUpperCase());
       setUploadAdId('');
       setUploadAssignMode('add');
       setBatchAssignmentMode('auto');
@@ -390,6 +394,7 @@ const CreativeGrid: React.FC = () => {
       
       const initialFormat = file.type.startsWith('video/') ? 'Video' : 'Display';
       setSelectedFormat(initialFormat);
+      setSelectedTech((NAMING_TAXONOMY.Tech[0] || 'dv360').toUpperCase());
       
       // Auto-detect image dimensions
       if (file.type.startsWith('image/')) {
@@ -510,7 +515,8 @@ const CreativeGrid: React.FC = () => {
       // Single Upload Logic
       setIsUploadModalOpen(false);
       const campaignPrefix = selectedCampaign ? `${selectedCampaign.name.substring(0, 10)}_` : '';
-      const finalName = `${campaignPrefix}${customName}_${selectedFormat}_${selectedSize.replace(/\s+/g, '_')}`;
+      const techToken = (selectedTech || 'DV360').trim().toUpperCase();
+      const finalName = `${campaignPrefix}${customName}_${techToken}_${selectedFormat}_${selectedSize.replace(/\s+/g, '_')}`;
 
       setToast({
         show: true,
@@ -557,46 +563,6 @@ const CreativeGrid: React.FC = () => {
         });
       }
       setPendingFile(null);
-    }
-  };
-
-  const handlePermissionsCheck = async () => {
-    if (!accessToken || !profileId) {
-      setToast({ show: true, type: 'error', message: 'No session', details: 'Login is required to verify CM360 permissions.' });
-      return;
-    }
-
-    setToast({ show: true, type: 'loading', message: 'Checking CM360 permissions...', details: 'Validating profile, campaign and Ads access.' });
-
-    try {
-      const profileRes = await fetch(`/api/cm360/userprofiles/${profileId}`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      if (!profileRes.ok) {
-        const data = await profileRes.json().catch(() => ({}));
-        setToast({ show: true, type: 'error', message: 'Permission check failed', details: data?.error?.message || `Profile access failed (${profileRes.status})` });
-        return;
-      }
-
-      if (selectedCampaign) {
-        const adsRes = await fetch(`/api/cm360/userprofiles/${profileId}/ads?campaignIds=${selectedCampaign.id}&maxResults=1`, {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        });
-        if (!adsRes.ok) {
-          const data = await adsRes.json().catch(() => ({}));
-          setToast({ show: true, type: 'error', message: 'Permission check failed', details: data?.error?.message || `Ads access failed (${adsRes.status})` });
-          return;
-        }
-      }
-
-      setToast({
-        show: true,
-        type: 'success',
-        message: 'Permissions look good',
-        details: 'Read access to CM360 profile and Ads is OK. Write to Ads is validated when assigning creatives.'
-      });
-    } catch (e: any) {
-      setToast({ show: true, type: 'error', message: 'Permission check failed', details: e.message || 'Network error during permission check.' });
     }
   };
 
@@ -864,14 +830,38 @@ const CreativeGrid: React.FC = () => {
     return <ImageIcon className="w-5 h-5 text-blue-500" />;
   };
 
+  const getScaledPreviewSize = (size: string, compact: boolean) => {
+    const parsed = normalizeSize(size);
+    const [rawWidth, rawHeight] = parsed ? parsed.split('x').map((value) => parseInt(value, 10)) : [300, 250];
+    const width = Number.isFinite(rawWidth) && rawWidth > 0 ? rawWidth : 300;
+    const height = Number.isFinite(rawHeight) && rawHeight > 0 ? rawHeight : 250;
+
+    const maxWidth = compact ? 30 : 170;
+    const maxHeight = compact ? 22 : 120;
+    const minWidth = compact ? 8 : 24;
+    const minHeight = compact ? 8 : 20;
+    const scale = Math.min(maxWidth / width, maxHeight / height);
+
+    return {
+      width: Math.max(minWidth, Math.round(width * scale)),
+      height: Math.max(minHeight, Math.round(height * scale)),
+      label: `${width}x${height}`,
+    };
+  };
+
   const renderCreativePlaceholder = (creative: Creative, compact = false) => {
     const label = creative.type?.replace(/_/g, ' ') || 'CREATIVE';
+    const previewSize = getScaledPreviewSize(creative.size, compact);
+
     return (
       <div className={`w-full h-full rounded-lg border border-blue-500/30 bg-gradient-to-br from-blue-600/20 via-slate-900 to-slate-950 flex flex-col items-center justify-center gap-2 ${compact ? 'px-2 py-1' : 'px-3 py-2'}`}>
-        <div className={`text-blue-300 ${compact ? 'scale-90' : ''}`}>{getIcon(creative.type)}</div>
+        <div
+          className="rounded-sm border border-blue-300/80 bg-blue-400/10 shadow-[0_0_0_1px_rgba(59,130,246,0.15)]"
+          style={{ width: `${previewSize.width}px`, height: `${previewSize.height}px` }}
+        />
         <div className="text-center leading-tight">
           <p className={`font-bold uppercase tracking-wider text-blue-200 ${compact ? 'text-[8px]' : 'text-[10px]'}`}>{label}</p>
-          <p className={`text-blue-400 font-mono ${compact ? 'text-[8px]' : 'text-[10px]'}`}>{creative.size}</p>
+          <p className={`text-blue-400 font-mono ${compact ? 'text-[8px]' : 'text-[10px]'}`}>{previewSize.label}</p>
         </div>
       </div>
     );
@@ -1492,25 +1482,34 @@ const CreativeGrid: React.FC = () => {
               )}
 
               <div>
-                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Format</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {CREATIVE_FORMATS.map(format => (
-                    <button
-                      key={format}
-                      onClick={() => {
-                        setSelectedFormat(format);
-                        setSelectedSize(CREATIVE_SPECS[format][0]);
-                      }}
-                      className={`py-2 rounded-lg text-[10px] font-bold transition-all border ${
-                        selectedFormat === format 
-                          ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20' 
-                          : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
-                      }`}
-                    >
-                      {format}
-                    </button>
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Tech</label>
+                <select
+                  value={selectedTech}
+                  onChange={(e) => setSelectedTech(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+                >
+                  {TECH_OPTIONS.map((tech) => (
+                    <option key={tech} value={tech}>{tech}</option>
                   ))}
-                </div>
+                </select>
+                <p className="text-[10px] text-slate-500 mt-2">This token is inserted before Format in creative naming.</p>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Format</label>
+                <select
+                  value={selectedFormat}
+                  onChange={(e) => {
+                    const nextFormat = e.target.value;
+                    setSelectedFormat(nextFormat);
+                    setSelectedSize(CREATIVE_SPECS[nextFormat][0]);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+                >
+                  {CREATIVE_FORMATS.map((format) => (
+                    <option key={format} value={format}>{format}</option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -1603,11 +1602,11 @@ const CreativeGrid: React.FC = () => {
               {pendingFiles.length === 0 && (
                 <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 mt-4">
                   <label className="block text-[9px] uppercase font-bold text-slate-600 mb-1">Final Name Preview</label>
-                  <p className="text-xs font-mono text-blue-400 truncate">
-                    {selectedCampaign ? `${selectedCampaign.name.substring(0, 10)}_` : ''}{customName}_{selectedFormat}_{selectedSize.replace(/\s+/g, '_')}
-                  </p>
-                </div>
-              )}
+                    <p className="text-xs font-mono text-blue-400 truncate">
+                     {selectedCampaign ? `${selectedCampaign.name.substring(0, 10)}_` : ''}{customName}_{(selectedTech || 'DV360').trim().toUpperCase()}_{selectedFormat}_{selectedSize.replace(/\s+/g, '_')}
+                    </p>
+                  </div>
+                )}
               
               <div className="flex gap-3 pt-4 flex-wrap">
                 <button 
@@ -1622,12 +1621,6 @@ const CreativeGrid: React.FC = () => {
                   className="flex-1 py-3 text-slate-400 hover:text-white font-bold transition-all"
                 >
                   Cancel
-                </button>
-                <button
-                  onClick={handlePermissionsCheck}
-                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold transition-all border border-slate-700"
-                >
-                  Check CM360 Permissions
                 </button>
                 <button 
                   onClick={confirmUpload}
