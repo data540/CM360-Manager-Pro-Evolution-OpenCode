@@ -58,6 +58,8 @@ export interface Creative {
   thumbnailUrl: string;
   placementIds: string[];
   externalUrl?: string;
+  isDraft?: boolean;
+  originalData?: Partial<Creative>;
 }
 
 export interface Ad {
@@ -71,6 +73,8 @@ export interface Ad {
   startTime?: string;
   endTime?: string;
   externalUrl?: string;
+  isDraft?: boolean;
+  originalData?: Partial<Ad>;
 }
 
 export interface BatchItem {

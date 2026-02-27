@@ -8,6 +8,7 @@ import CampaignGrid from './components/CampaignGrid';
 import AdGrid from './components/AdGrid';
 import AIHelper from './components/AIHelper';
 import Login from './components/Login';
+import SettingsPanel from './components/SettingsPanel';
 import { ChevronRight, LogOut } from 'lucide-react';
 
 class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: string }> {
@@ -46,8 +47,8 @@ const Header: React.FC = () => {
   const { selectedAdvertiser, selectedCampaign, currentView, user, logout, profileId } = useApp();
 
   return (
-    <header className="h-14 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-950/80 backdrop-blur-md sticky top-0 z-20">
-      <div className="flex items-center gap-3 text-[11px] uppercase tracking-widest font-bold">
+    <header className="top-header h-16 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-950/80 backdrop-blur-md sticky top-0 z-20">
+      <div className="header-breadcrumb flex items-center gap-3 text-xs uppercase tracking-[0.14em] font-bold">
         <span className="text-slate-500">{currentView}</span>
         {selectedAdvertiser && (
           <>
@@ -63,9 +64,9 @@ const Header: React.FC = () => {
         )}
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="header-userbar flex items-center gap-4">
         {profileId && (
-          <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-900 border border-slate-800 rounded-full text-[10px] text-slate-500 font-bold">
+          <div className="header-profileid flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-full text-xs text-slate-500 font-semibold">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
             Profile ID: {profileId}
           </div>
@@ -76,8 +77,8 @@ const Header: React.FC = () => {
         {user && (
           <div className="flex items-center gap-3 pl-4">
              <div className="text-right hidden sm:block">
-               <p className="text-[10px] font-bold text-slate-200 leading-none">{user.name}</p>
-               <p className="text-[9px] text-slate-600 leading-none mt-1">{user.email}</p>
+               <p className="text-xs font-bold text-slate-200 leading-none">{user.name}</p>
+               <p className="text-[11px] text-slate-600 leading-none mt-1">{user.email}</p>
              </div>
              <div className="relative">
                <img src={user.picture} className="w-8 h-8 rounded-full border border-slate-700 shadow-xl" alt="Profile" />
@@ -97,7 +98,7 @@ const Header: React.FC = () => {
   );
 };
 
-const MainContent: React.FC = () => {
+const MainContent: React.FC<{ theme: 'dark' | 'light'; onThemeChange: (theme: 'dark' | 'light') => void }> = ({ theme, onThemeChange }) => {
   const { currentView } = useApp();
 
   const renderView = () => {
@@ -112,6 +113,8 @@ const MainContent: React.FC = () => {
         return <CreativeGrid />;
       case 'Ads':
         return <AdGrid />;
+      case 'Settings':
+        return <SettingsPanel theme={theme} onThemeChange={onThemeChange} />;
       default:
         return (
           <div className="flex items-center justify-center h-full text-slate-600 italic font-mono text-xs uppercase tracking-tighter">
@@ -133,15 +136,23 @@ const MainContent: React.FC = () => {
 
 const AppShell: React.FC = () => {
   const { isAuthenticated } = useApp();
+  const [theme, setTheme] = React.useState<'dark' | 'light'>(() => {
+    const saved = localStorage.getItem('cm360_theme_mode');
+    return saved === 'light' ? 'light' : 'dark';
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('cm360_theme_mode', theme);
+  }, [theme]);
 
   if (!isAuthenticated) {
     return <Login />;
   }
 
   return (
-    <div className="flex h-screen w-screen bg-[#020617] text-slate-100 font-sans overflow-hidden">
+    <div className={`app-shell ${theme === 'light' ? 'theme-light' : ''} flex h-screen w-screen bg-[#020617] text-slate-100 font-sans overflow-hidden`}>
       <Sidebar />
-      <MainContent />
+      <MainContent theme={theme} onThemeChange={setTheme} />
     </div>
   );
 };

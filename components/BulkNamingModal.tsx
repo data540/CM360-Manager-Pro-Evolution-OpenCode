@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { Placement } from '../types';
 import { X, Type, ChevronsLeft, ChevronsRight } from 'lucide-react';
 
 interface BulkNamingModalProps {
-  placements: Placement[];
+  items: Array<{ id: string; name: string }>;
+  entityLabel?: string;
   onClose: () => void;
   onApply: (config: BulkNamingConfig) => void;
 }
@@ -15,48 +15,49 @@ export interface BulkNamingConfig {
   separator: string;
 }
 
-const BulkNamingModal: React.FC<BulkNamingModalProps> = ({ placements, onClose, onApply }) => {
+export const applyBulkNamingConfig = (name: string, config: BulkNamingConfig): string => {
+  if (!config.value) return name;
+
+  switch (config.mode) {
+    case 'prefix':
+      return `${config.value}${config.separator}${name}`;
+    case 'suffix':
+      return `${name}${config.separator}${config.value}`;
+    case 'replace':
+      if (!config.replaceFrom) return name;
+      return name.replace(new RegExp(config.replaceFrom, 'g'), config.value);
+    default:
+      return name;
+  }
+};
+
+const BulkNamingModal: React.FC<BulkNamingModalProps> = ({ items, entityLabel = 'Items', onClose, onApply }) => {
   const [config, setConfig] = useState<BulkNamingConfig>({ mode: 'suffix', value: '', separator: '_' });
 
-  const { previewPlacements, changedCount } = useMemo(() => {
+  const { previewItems, changedCount } = useMemo(() => {
     let changed = 0;
-    const allPreviews = placements.map(p => {
-      let newName = p.name;
-      if (config.value) {
-        switch (config.mode) {
-          case 'prefix':
-            newName = `${config.value}${config.separator}${p.name}`;
-            break;
-          case 'suffix':
-            newName = `${p.name}${config.separator}${config.value}`;
-            break;
-          case 'replace':
-            if (config.replaceFrom) {
-              newName = p.name.replace(new RegExp(config.replaceFrom, 'g'), config.value);
-            }
-            break;
-        }
-      }
-      if (newName !== p.name) changed++;
-      return { ...p, newName };
+    const allPreviews = items.map((item) => {
+      const newName = applyBulkNamingConfig(item.name, config);
+      if (newName !== item.name) changed++;
+      return { ...item, newName };
     });
     return { 
-      previewPlacements: allPreviews.slice(0, 20), 
+      previewItems: allPreviews.slice(0, 20), 
       changedCount: changed 
     };
-  }, [placements, config]);
+  }, [items, config]);
 
   return (
     <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-3xl shadow-2xl animate-in fade-in zoom-in-95 duration-200">
         <div className="flex justify-between items-start mb-6">
           <div>
-            <h3 className="text-xl font-bold text-white">Bulk Naming Tool</h3>
-            <div className="flex items-center gap-4 mt-1">
-              <p className="text-slate-400 text-sm">Selected: <span className="text-white font-bold">{placements.length}</span></p>
-              <p className="text-slate-400 text-sm">To be changed: <span className="text-blue-400 font-bold">{changedCount}</span></p>
+              <h3 className="text-xl font-bold text-white">Bulk Naming Tool</h3>
+              <div className="flex items-center gap-4 mt-1">
+                <p className="text-slate-400 text-sm">Selected: <span className="text-white font-bold">{items.length}</span></p>
+                <p className="text-slate-400 text-sm">To be changed: <span className="text-blue-400 font-bold">{changedCount}</span></p>
+              </div>
             </div>
-          </div>
           <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
             <X className="w-5 h-5" />
           </button>
@@ -114,23 +115,23 @@ const BulkNamingModal: React.FC<BulkNamingModalProps> = ({ placements, onClose, 
               </tr>
             </thead>
             <tbody>
-              {previewPlacements.map(p => (
-                <tr key={p.id} className={p.name === p.newName ? 'opacity-40' : ''}>
-                  <td className="p-2 font-mono text-xs text-slate-500 truncate max-w-xs">{p.name}</td>
+              {previewItems.map(item => (
+                <tr key={item.id} className={item.name === item.newName ? 'opacity-40' : ''}>
+                  <td className="p-2 font-mono text-xs text-slate-500 truncate max-w-xs">{item.name}</td>
                   <td className="p-2 text-center text-blue-500">
-                    {p.name === p.newName ? (
+                    {item.name === item.newName ? (
                       <span className="text-[10px] text-slate-600 font-bold">NO CHANGE</span>
                     ) : (
                       <ChevronsRight className="w-4 h-4 mx-auto" />
                     )}
                   </td>
-                  <td className="p-2 font-mono text-xs text-blue-400 truncate max-w-xs">{p.newName}</td>
+                  <td className="p-2 font-mono text-xs text-blue-400 truncate max-w-xs">{item.newName}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {placements.length > 20 && (
-            <p className="text-center text-xs text-slate-600 mt-2">... and {placements.length - 20} more placements.</p>
+          {items.length > 20 && (
+            <p className="text-center text-xs text-slate-600 mt-2">... and {items.length - 20} more {entityLabel.toLowerCase()}.</p>
           )}
         </div>
 
@@ -146,7 +147,7 @@ const BulkNamingModal: React.FC<BulkNamingModalProps> = ({ placements, onClose, 
             disabled={!config.value}
             className="px-8 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-sm transition-all shadow-lg shadow-blue-600/20 disabled:opacity-50"
           >
-            Apply to {placements.length} Placements
+            Apply to {items.length} {entityLabel}
           </button>
         </div>
       </div>

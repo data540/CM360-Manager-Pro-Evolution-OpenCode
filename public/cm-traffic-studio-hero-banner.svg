@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520" fill="none">
+  <defs>
+    <radialGradient id="bg" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(480 260) rotate(90) scale(320 520)">
+      <stop offset="0" stop-color="#0b1f1b"/>
+      <stop offset="1" stop-color="#06120f"/>
+    </radialGradient>
+    <filter id="glow" x="0" y="0" width="960" height="520" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.07 0 0 0 0 0.92 0 0 0 0 0.62 0 0 0 0.45 0" result="softGlow"/>
+      <feBlend mode="screen" in="softGlow" in2="SourceGraphic"/>
+    </filter>
+  </defs>
+
+  <rect width="960" height="520" rx="22" fill="url(#bg)"/>
+  <rect x="85" y="110" width="790" height="300" rx="60" stroke="#3ce89b" stroke-opacity="0.45" stroke-width="3"/>
+
+  <g transform="translate(150,168)" filter="url(#glow)">
+    <polygon points="94,0 166,42 166,126 94,168 22,126 22,42" fill="none" stroke="#52F3A4" stroke-width="11" stroke-linejoin="round"/>
+    <polygon points="94,31 138,57 138,111 94,137 50,111 50,57" fill="none" stroke="#52F3A4" stroke-width="9" stroke-linejoin="round"/>
+    <polygon points="94,58 113,69 113,91 94,102 75,91 75,69" fill="none" stroke="#52F3A4" stroke-width="7" stroke-linejoin="round"/>
+  </g>
+
+  <g transform="translate(350,195)" filter="url(#glow)">
+    <text x="0" y="58" fill="#F8FAFC" font-family="Manrope, Inter, sans-serif" font-size="74" font-weight="800">CM TRAFFIC</text>
+    <text x="0" y="132" fill="#52F3A4" font-family="Manrope, Inter, sans-serif" font-size="74" font-weight="800">STUDIO</text>
+  </g>
+
+</svg>

@@ -21,6 +21,7 @@ import {
   Edit3
 } from 'lucide-react';
 import Toast from './Toast';
+import BulkNamingModal, { applyBulkNamingConfig } from './BulkNamingModal';
 
 const CampaignGrid: React.FC = () => {
   const { 
@@ -45,6 +46,8 @@ const CampaignGrid: React.FC = () => {
   const [editValue, setEditValue] = useState('');
   const [editStartDate, setEditStartDate] = useState('');
   const [editEndDate, setEditEndDate] = useState('');
+  const [isBulkNamingOpen, setIsBulkNamingOpen] = useState(false);
+  const [isBulkActionsOpen, setIsBulkActionsOpen] = useState(false);
 
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'loading', message: string, details?: string, link?: string}>({
     show: false,
@@ -114,8 +117,8 @@ const CampaignGrid: React.FC = () => {
   );
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-950/40">
-      <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-4 bg-slate-900/50 backdrop-blur-sm">
+    <div className="view-root flex-1 flex flex-col h-full bg-slate-950/40">
+      <div className="view-toolbar p-4 border-b border-slate-800 flex items-center justify-between gap-4 bg-slate-900/50 backdrop-blur-sm">
         <div className="flex-1 max-w-md relative">
           <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
           <input 
@@ -128,10 +131,39 @@ const CampaignGrid: React.FC = () => {
         </div>
         
         <div className="flex items-center gap-2">
+          {selectedRows.size > 0 && (
+            <div className="flex items-center bg-blue-600/10 px-3 py-1.5 rounded-lg border border-blue-500/20 gap-3 mr-2 relative">
+              <span className="text-xs font-bold text-blue-400 uppercase tracking-wider">{selectedRows.size} selected</span>
+              <div className="w-px h-4 bg-blue-500/20" />
+              <div className="relative">
+                <button
+                  onClick={() => setIsBulkActionsOpen((prev) => !prev)}
+                  className="text-slate-400 hover:text-white transition-colors"
+                  title="Bulk actions"
+                >
+                  <MoreVertical className="w-3.5 h-3.5" />
+                </button>
+                {isBulkActionsOpen && (
+                  <div className="absolute right-0 top-6 w-52 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-20 py-1">
+                    <button
+                      onClick={() => {
+                        setIsBulkNamingOpen(true);
+                        setIsBulkActionsOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2"
+                    >
+                      <Zap className="w-3.5 h-3.5" /> Bulk naming
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <button 
             onClick={handlePushToCM360}
             disabled={selectedRows.size === 0 || connectionStatus !== 'Connected'}
-            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 disabled:shadow-none"
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-bold transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 disabled:shadow-none"
           >
             <Zap className="w-3.5 h-3.5" />
             Push to CM360 ({selectedRows.size})
@@ -139,13 +171,13 @@ const CampaignGrid: React.FC = () => {
           <button 
             onClick={handleRefresh}
             disabled={!selectedAdvertiser || isCampaignsLoading}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-bold transition-all border border-slate-700 disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-bold transition-all border border-slate-700 disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isCampaignsLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
           <button 
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-blue-500/20"
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-bold transition-all shadow-lg shadow-emerald-500/20"
             onClick={() => {
               window.dispatchEvent(new CustomEvent('open-campaign-modal'));
             }}
@@ -157,30 +189,31 @@ const CampaignGrid: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-auto relative custom-scrollbar">
+        <div className="list-surface m-4 rounded-2xl border border-[#2a4163] bg-[#152542] overflow-hidden">
         <table className="w-full text-left border-collapse min-w-[1000px]">
           <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-900/90 backdrop-blur-md border-b border-slate-800">
+            <tr className="list-header-row bg-[#1b2d4d] border-b border-[#2a4163]">
               <th className="p-4 w-12">
                 <input 
                   type="checkbox" 
-                  className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900"
+                  className="appearance-none w-4 h-4 rounded-full border border-slate-500 bg-transparent checked:bg-emerald-400 checked:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                   checked={selectedRows.size === filteredCampaigns.length && filteredCampaigns.length > 0}
                   onChange={toggleAll}
                 />
               </th>
-              <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400">
                 <div className="flex items-center gap-2 cursor-pointer hover:text-slate-300 transition-colors">
                   Campaign Name <ArrowUpDown className="w-3 h-3" />
                 </div>
               </th>
-              <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Status</th>
-              <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Flight Dates</th>
-              <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Budget</th>
-              <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Objective</th>
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400">Status</th>
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400">Flight Dates</th>
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400">Budget</th>
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400">Objective</th>
               <th className="p-4 w-12"></th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800/50">
+          <tbody className="divide-y divide-[#263a5b]">
             {filteredCampaigns.map((c) => {
               const draft = campaignsDrafts[c.id];
               const displayCampaign = draft ? { ...c, ...draft } : c;
@@ -188,7 +221,7 @@ const CampaignGrid: React.FC = () => {
               return (
                 <tr 
                   key={c.id} 
-                  className={`group hover:bg-blue-600/[0.03] transition-colors cursor-pointer ${selectedRows.has(c.id) ? 'bg-blue-600/[0.05]' : ''}`}
+                  className={`list-row group hover:bg-[#1b2d4d]/60 transition-colors cursor-pointer ${selectedRows.has(c.id) ? 'list-row-selected bg-[#1f3458]' : ''}`}
                   onClick={() => {
                     setSelectedCampaign(c);
                     setCurrentView('Placements');
@@ -197,7 +230,7 @@ const CampaignGrid: React.FC = () => {
                   <td className="p-4" onClick={(e) => e.stopPropagation()}>
                     <input 
                       type="checkbox" 
-                      className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900"
+                      className="appearance-none w-4 h-4 rounded-full border border-slate-500 bg-transparent checked:bg-emerald-400 checked:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                       checked={selectedRows.has(c.id)}
                       onChange={() => toggleRow(c.id)}
                     />
@@ -236,12 +269,12 @@ const CampaignGrid: React.FC = () => {
                         setEditValue(displayCampaign.name);
                       }}>
                         <div className="flex items-center gap-2">
-                          <span className={`text-sm font-bold transition-colors ${displayCampaign.isDraft ? 'text-amber-400' : 'text-slate-200 group-hover:text-blue-400'}`}>
-                            {displayCampaign.name}
-                          </span>
+                        <span className={`text-lg font-bold transition-colors ${displayCampaign.isDraft ? 'text-amber-400' : 'text-slate-100 group-hover:text-blue-300'}`}>
+                          {displayCampaign.name}
+                        </span>
                           <Edit3 className="w-3 h-3 opacity-0 group-hover/name:opacity-100 transition-opacity text-slate-500" />
                         </div>
-                        <span className="text-[10px] text-slate-500 font-mono mt-0.5">ID: {c.id}</span>
+                        <span className="text-xs text-slate-400 font-mono mt-0.5">ID: {c.id}</span>
                       </div>
                     )}
                   </td>
@@ -255,7 +288,7 @@ const CampaignGrid: React.FC = () => {
                         className="flex items-center gap-2 px-2 py-1 rounded-md hover:bg-slate-800 transition-all"
                       >
                         <div className={`w-1.5 h-1.5 rounded-full ${displayCampaign.status === 'Active' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : displayCampaign.status === 'Paused' ? 'bg-amber-500' : 'bg-slate-600'}`} />
-                        <span className={`text-[10px] font-bold uppercase ${displayCampaign.status === 'Active' ? 'text-emerald-500' : displayCampaign.status === 'Paused' ? 'text-amber-500' : 'text-slate-400'}`}>
+                        <span className={`text-sm font-bold uppercase tracking-widest ${displayCampaign.status === 'Active' ? 'text-emerald-400' : displayCampaign.status === 'Paused' ? 'text-amber-400' : 'text-slate-300'}`}>
                           {displayCampaign.status} {displayCampaign.isDraft && displayCampaign.status !== c.status ? '(Draft)' : ''}
                         </span>
                         <ChevronDown className="w-3 h-3 text-slate-600" />
@@ -270,7 +303,7 @@ const CampaignGrid: React.FC = () => {
                             <button
                               key={status}
                               onClick={() => handleStatusChange(c.id, status)}
-                              className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                              className={`w-full flex items-center justify-between px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${
                                 displayCampaign.status === status ? 'text-blue-400 bg-blue-400/5' : 'text-slate-400 hover:text-white hover:bg-slate-800'
                               }`}
                             >
@@ -292,14 +325,14 @@ const CampaignGrid: React.FC = () => {
                       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         <input 
                           type="date"
-                          className="bg-slate-950 border border-blue-500 rounded px-1 py-0.5 text-[10px] outline-none text-slate-300"
+                          className="bg-slate-950 border border-blue-500 rounded px-1.5 py-1 text-xs outline-none text-slate-200"
                           value={editStartDate}
                           onChange={(e) => setEditStartDate(e.target.value)}
                         />
                         <span className="text-slate-800">—</span>
                         <input 
                           type="date"
-                          className="bg-slate-950 border border-blue-500 rounded px-1 py-0.5 text-[10px] outline-none text-slate-300"
+                          className="bg-slate-950 border border-blue-500 rounded px-1.5 py-1 text-xs outline-none text-slate-200"
                           value={editEndDate}
                           onChange={(e) => setEditEndDate(e.target.value)}
                         />
@@ -325,7 +358,7 @@ const CampaignGrid: React.FC = () => {
                           setEditEndDate(displayCampaign.endDate);
                         }}
                       >
-                        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                        <div className="flex items-center gap-2 text-sm text-slate-300">
                           <Calendar className="w-3 h-3 text-slate-600" />
                           <span className={displayCampaign.isDraft && (displayCampaign.startDate !== c.startDate || displayCampaign.endDate !== c.endDate) ? 'text-amber-400' : ''}>
                             {displayCampaign.startDate} <span className="text-slate-700">—</span> {displayCampaign.endDate}
@@ -336,14 +369,14 @@ const CampaignGrid: React.FC = () => {
                     )}
                   </td>
                   <td className="p-4">
-                    <span className="text-[11px] font-mono text-slate-300">
+                    <span className="text-sm font-mono text-slate-200">
                       ${c.budget.toLocaleString()}
                     </span>
                   </td>
                   <td className="p-4">
                     <div className="flex items-center gap-2">
                       <Target className="w-3 h-3 text-slate-600" />
-                      <span className="text-[11px] text-slate-400">{c.objective || 'Not set'}</span>
+                      <span className="text-sm text-slate-300">{c.objective || 'Not set'}</span>
                     </div>
                   </td>
                   <td className="p-4">
@@ -397,12 +430,31 @@ const CampaignGrid: React.FC = () => {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       <Toast 
         {...toast} 
         onClose={() => setToast(prev => ({ ...prev, show: false }))} 
       />
+
+      {isBulkNamingOpen && (
+        <BulkNamingModal
+          items={filteredCampaigns.filter((c) => selectedRows.has(c.id)).map((c) => ({ id: c.id, name: c.name }))}
+          entityLabel="Campaigns"
+          onClose={() => setIsBulkNamingOpen(false)}
+          onApply={(config) => {
+            selectedRows.forEach((id) => {
+              const campaign = filteredCampaigns.find((c) => c.id === id);
+              if (!campaign) return;
+              const newName = applyBulkNamingConfig(campaign.name, config);
+              updateCampaignDraft(id, { name: newName });
+            });
+            setIsBulkNamingOpen(false);
+            setSelectedRows(new Set());
+          }}
+        />
+      )}
     </div>
   );
 };

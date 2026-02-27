@@ -1,21 +1,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { 
-  Shield, Key, Zap, Loader2, ArrowRight, AlertCircle, 
-  Settings2, Info, CheckCircle2, Globe, Copy, Check, 
-  ExternalLink, HelpCircle 
-} from 'lucide-react';
+import { AlertCircle, ArrowRight, Bolt, KeyRound, Loader2, LogIn, Rocket, Target } from 'lucide-react';
 
 const Login: React.FC = () => {
-  const { login, loginWithToken, connectionStatus, enterDemoMode } = useApp();
+  const { login, loginWithToken, connectionStatus } = useApp();
   const [manualToken, setManualToken] = useState('');
-  const [clientId, setClientId] = useState(localStorage.getItem('cm360_custom_client_id') || '');
   const [showManual, setShowManual] = useState(false);
-  const [showConfig, setShowConfig] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  
+
   const loading = connectionStatus === 'Connecting';
 
   useEffect(() => {
@@ -25,12 +18,6 @@ const Login: React.FC = () => {
     window.addEventListener('cm360_auth_error', handleError);
     return () => window.removeEventListener('cm360_auth_error', handleError);
   }, []);
-
-  const copyOrigin = () => {
-    navigator.clipboard.writeText(window.location.origin);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,205 +29,162 @@ const Login: React.FC = () => {
     }
   };
 
-  const handleLoginWithClientId = () => {
+  const handleGoogleSignIn = () => {
     setError(null);
-    if (clientId.trim()) {
-      localStorage.setItem('cm360_custom_client_id', clientId.trim());
-    }
-    login(clientId.trim() || undefined);
+    login();
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#020617] flex items-center justify-center p-6 overflow-hidden relative font-sans">
-      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/10 rounded-full blur-[120px]" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-600/10 rounded-full blur-[120px]" />
-      
-      <div className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-2 gap-12 items-center relative z-10">
-        <div className="max-w-xl">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center font-bold text-2xl text-white italic shadow-lg shadow-blue-500/20">CP</div>
-            <h1 className="text-3xl font-bold tracking-tight text-white">CM360 <span className="text-blue-500">Pro</span></h1>
-          </div>
-          
-          <h2 className="text-4xl md:text-6xl font-extrabold text-white mb-6 leading-tight">
-            AdOps <br />
-            <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-400">Precision.</span>
-          </h2>
-          
-          <p className="text-slate-400 text-lg mb-10 leading-relaxed">
-            Enterprise-grade placement builder. Connect your CM360 account to start automating your trafficking workflow.
-          </p>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="p-4 rounded-2xl bg-slate-900/50 border border-slate-800">
-              <Zap className="w-6 h-6 text-blue-500 mb-3" />
-              <p className="text-sm font-bold text-slate-200">Bulk Engine</p>
-              <p className="text-xs text-slate-500 mt-1">Generate 100+ placements in seconds.</p>
+    <div className="min-h-screen w-full bg-[#050607] overflow-auto relative">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_14%,rgba(16,185,129,0.24),rgba(5,6,7,0)_36%)]" />
+      <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-6 md:px-8 md:py-10">
+        <div className="mx-auto w-full max-w-[460px] rounded-[28px] border border-white/10 bg-[#080a0c]/95 shadow-[0_30px_120px_rgba(0,0,0,0.55)] md:max-w-[520px]">
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-4 md:px-5">
+            <div className="flex items-center gap-2">
+              <img
+                src="/cm-traffic-studio-logo-dark.svg"
+                alt="CM Traffic Studio"
+                className="h-10 w-auto max-w-[230px] object-contain"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
             </div>
-            <div className="p-4 rounded-2xl bg-slate-900/50 border border-slate-800">
-              <Shield className="w-6 h-6 text-emerald-500 mb-3" />
-              <p className="text-sm font-bold text-slate-200">Secure Sync</p>
-              <p className="text-xs text-slate-500 mt-1">Native Google OAuth 2.0 Integration.</p>
+            <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/15 px-3 py-2 text-center text-xs font-bold text-emerald-300">
+              Acceso
+              <br />
+              Expertos
             </div>
           </div>
-        </div>
 
-        <div className="flex flex-col gap-6">
-          <div className="glass rounded-[2.5rem] p-8 md:p-10 border border-white/10 shadow-2xl relative overflow-hidden">
-            {loading ? (
-              <div className="py-20 flex flex-col items-center justify-center text-center">
-                <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-6" />
-                <h3 className="text-xl font-bold text-white mb-2">Connecting to CM360</h3>
-                <p className="text-slate-500 text-sm italic">Validating your AdOps profile...</p>
-              </div>
-            ) : (
-              <>
-                <div className="mb-8 flex justify-between items-start">
-                  <div>
-                    <h3 className="text-2xl font-bold text-white mb-2">Welcome Back</h3>
-                    <p className="text-slate-500 text-sm">Select your authentication method.</p>
-                  </div>
-                  <HelpCircle className="w-5 h-5 text-slate-700 cursor-help" title="Configuración de API de Google" />
-                </div>
+          <div className="px-4 pb-8 pt-7 md:px-6 md:pt-10">
+            <div className="mx-auto w-fit rounded-full border border-emerald-400/25 bg-emerald-500/10 px-4 py-2 text-center text-[11px] font-bold uppercase tracking-[0.12em] text-emerald-300">
+              Disponible para agencias en España
+            </div>
 
-                {error && (
-                  <div className="mb-6 p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 flex gap-3 animate-in fade-in slide-in-from-top-2">
-                    <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-[11px] font-bold text-rose-500 uppercase tracking-wider mb-1">Diagnostic Error</p>
-                      <p className="text-xs text-rose-200/90 leading-relaxed font-mono">{error}</p>
-                    </div>
-                  </div>
-                )}
+            <div className="mt-8 text-center">
+              <h1 className="text-[56px] font-extrabold leading-[0.9] tracking-tight text-white md:text-[64px]">
+                CM Traffic
+                <span className="block text-emerald-400">Studio</span>
+              </h1>
+              <p className="mx-auto mt-6 max-w-[340px] text-[29px] leading-relaxed text-slate-300">
+                La potencia del <span className="font-bold italic text-white">bulk</span>, la precisión de un experto.
+              </p>
+            </div>
 
-                <div className="space-y-4">
-                  <button 
-                    onClick={handleLoginWithClientId}
-                    className="w-full group bg-white text-slate-950 font-bold py-4 px-6 rounded-2xl flex items-center justify-center gap-3 hover:bg-slate-100 transition-all active:scale-95 shadow-xl shadow-white/5"
-                  >
-                    <img src="https://www.gstatic.com/images/branding/product/1x/gsa_512dp.png" className="w-5 h-5" alt="Google" />
-                    Sign in with Google
-                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                  </button>
+            <div className="mt-8 space-y-3">
+              <button
+                onClick={handleGoogleSignIn}
+                disabled={loading}
+                className="w-full rounded-2xl bg-gradient-to-r from-emerald-400 to-emerald-500 px-5 py-4 text-lg font-extrabold text-[#03140f] shadow-[0_10px_30px_rgba(16,185,129,0.35)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <span className="inline-flex items-center gap-2">
+                  {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <LogIn className="h-5 w-5" />}
+                  Sign in with Google
+                </span>
+              </button>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <button 
-                      onClick={() => setShowManual(!showManual)}
-                      className={`py-3 rounded-2xl border transition-all text-xs font-bold flex items-center justify-center gap-2 ${
-                        showManual ? 'bg-slate-800 border-slate-600 text-white' : 'border-slate-800 text-slate-500 hover:border-slate-700 hover:text-slate-300'
-                      }`}
-                    >
-                      <Key className="w-3.5 h-3.5" /> Token Access
-                    </button>
-                    <button 
-                      onClick={() => setShowConfig(!showConfig)}
-                      className={`py-3 rounded-2xl border transition-all text-xs font-bold flex items-center justify-center gap-2 ${
-                        showConfig ? 'bg-slate-800 border-slate-600 text-white' : 'border-slate-800 text-slate-500 hover:border-slate-700 hover:text-slate-300'
-                      }`}
-                    >
-                      <Settings2 className="w-3.5 h-3.5" /> Custom Config
-                    </button>
-                  </div>
+              <button
+                onClick={() => setShowManual((value) => !value)}
+                className="w-full rounded-2xl border border-slate-700 bg-[#1f2a40] px-5 py-4 text-lg font-bold text-slate-100 transition hover:border-slate-500"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <KeyRound className="h-5 w-5" />
+                  Token Access
+                </span>
+              </button>
+            </div>
 
-                  {showConfig && (
-                    <div className="p-5 bg-slate-950/50 rounded-2xl border border-slate-800 animate-in zoom-in-95 duration-200">
-                      <div className="flex items-center gap-2 mb-3">
-                        <Globe className="w-3.5 h-3.5 text-blue-400" />
-                        <label className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Google Client ID</label>
-                      </div>
-                      <input 
-                        type="text"
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-xs text-blue-300 focus:outline-none focus:border-blue-500 font-mono"
-                        placeholder="000000000000-xxxxx.apps.googleusercontent.com"
-                        value={clientId}
-                        onChange={(e) => setClientId(e.target.value)}
-                      />
-                      <p className="text-[10px] text-slate-600 mt-3 leading-relaxed">
-                        Usa tu propio Client ID si el predeterminado no funciona para tu dominio actual.
-                      </p>
-                    </div>
-                  )}
-
-                  {showManual && (
-                    <form onSubmit={handleManualSubmit} className="p-5 bg-slate-950/50 rounded-2xl border border-slate-800 animate-in zoom-in-95 duration-200 space-y-3">
-                      <div className="flex items-center gap-2">
-                        <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                        <label className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Manual OAuth Token</label>
-                      </div>
-                      <textarea 
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-xs text-emerald-300 focus:outline-none focus:border-emerald-500 font-mono min-h-[80px]"
-                        placeholder="ya29.a0AfH6S..."
-                        value={manualToken}
-                        onChange={(e) => setManualToken(e.target.value)}
-                      />
-                      <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs transition-colors">
-                        Apply Token
-                      </button>
-                    </form>
-                  )}
-
-                  <div className="relative py-4">
-                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-800/50"></div></div>
-                    <div className="relative flex justify-center text-[10px] uppercase font-bold tracking-[0.2em] text-slate-700">
-                      <span className="bg-[#0f172a] px-4">Development</span>
-                    </div>
-                  </div>
-
-                  <button 
-                    onClick={enterDemoMode}
-                    className="w-full py-4 border border-dashed border-slate-800 rounded-2xl text-slate-600 hover:text-blue-400 hover:border-blue-500/50 transition-all text-sm font-bold flex items-center justify-center gap-2"
-                  >
-                    Enter Demo Sandbox
-                  </button>
-                </div>
-              </>
+            {showManual && (
+              <form onSubmit={handleManualSubmit} className="mt-4 rounded-2xl border border-slate-800 bg-[#0b0d10] p-4">
+                <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Manual OAuth Token</label>
+                <textarea
+                  className="min-h-[90px] w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-emerald-300 font-mono focus:border-emerald-500 focus:outline-none"
+                  placeholder="ya29.a0AfH6S..."
+                  value={manualToken}
+                  onChange={(e) => setManualToken(e.target.value)}
+                />
+                <button type="submit" className="mt-3 w-full rounded-xl bg-emerald-500 py-2.5 text-sm font-bold text-[#042017] transition hover:bg-emerald-400">
+                  Apply Token
+                </button>
+              </form>
             )}
-          </div>
 
-          <div className="p-6 bg-slate-900/50 border border-slate-800 rounded-3xl space-y-4">
-            <div className="flex gap-4">
-              <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center shrink-0">
-                <Globe className="w-5 h-5 text-blue-500" />
-              </div>
-              <div className="flex-1">
-                <h4 className="text-sm font-bold text-slate-200 mb-1">Autorización del Dominio</h4>
-                <p className="text-xs text-slate-500 leading-relaxed mb-4">
-                  Esta URL debe estar en la lista de "JavaScript origins" de tu app de Google.
+            {error && (
+              <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
+                <p className="mb-1 inline-flex items-center gap-2 font-bold uppercase tracking-wider text-rose-300">
+                  <AlertCircle className="h-4 w-4" /> Access Error
                 </p>
-                
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 mb-4 flex items-center justify-between gap-3 group">
-                  <code className="text-[10px] text-blue-400 font-mono truncate flex-1">
-                    {window.location.origin}
-                  </code>
-                  <button 
-                    onClick={copyOrigin}
-                    className="p-2 hover:bg-slate-800 rounded-lg text-slate-500 hover:text-blue-400 transition-all"
-                  >
-                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                  </button>
-                </div>
+                <p className="font-mono">{error}</p>
               </div>
-            </div>
+            )}
 
-            <div className="pt-2 border-t border-slate-800 space-y-3">
-              <h5 className="text-[10px] uppercase font-bold text-slate-600 tracking-widest flex items-center gap-2">
-                <Info className="w-3 h-3" /> Solución de problemas comunes
-              </h5>
-              <div className="space-y-2">
-                <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-1 shrink-0" />
-                  <span><b>API Habilitada:</b> Busca "Campaign Manager 360 API" en Cloud Console y asegúrate de que esté activa.</span>
+            <p className="mx-auto mt-8 max-w-[360px] text-center text-[28px] leading-relaxed text-slate-300">
+              Acceso inmediato sin fricción para profesionales.
+            </p>
+
+            <section className="mt-14 text-center">
+              <div className="mt-8 space-y-3 text-left">
+                <div className="rounded-2xl border border-slate-700 bg-[#1a1d24] p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-400/15 text-emerald-300"><Rocket className="h-4 w-4" /></div>
+                    <div>
+                      <p className="text-2xl font-extrabold text-white">Bulk Power</p>
+                      <p className="mt-1 text-[13px] text-slate-300">Gestión masiva de campañas con un solo clic. Sin latencia.</p>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-1 shrink-0" />
-                  <span><b>Test Users:</b> Si tu app está en modo "Testing", añade tu email en la sección de "OAuth Consent Screen".</span>
-                </div>
-                <div className="flex items-start gap-2 text-[11px] text-slate-400 text-amber-400/80">
-                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1 shrink-0" />
-                  <span><b>Perfil CM360:</b> Tu email de Google debe tener acceso directo a un perfil dentro de <a href="https://campaignmanager.google.com" target="_blank" className="underline font-bold">CM360</a>.</span>
+                <div className="rounded-2xl border border-slate-700 bg-[#1a1d24] p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-400/15 text-emerald-300"><Target className="h-4 w-4" /></div>
+                    <div>
+                      <p className="text-2xl font-extrabold text-white">Expert Precision</p>
+                      <p className="mt-1 text-[13px] text-slate-300">Algoritmos para una segmentación exacta en mercado español.</p>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            </section>
+
+            <section className="mt-10 grid grid-cols-2 gap-3">
+              <div className="rounded-2xl border border-slate-800 bg-[#111317] p-3">
+                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Ahorro</p>
+                <p className="mt-1 text-5xl font-black text-white">85%</p>
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-[#111317] p-3">
+                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Precisión</p>
+                <p className="mt-1 text-5xl font-black text-white">99.9%</p>
+              </div>
+              <div className="col-span-2 rounded-2xl border border-emerald-400/35 bg-gradient-to-r from-emerald-500/12 to-emerald-400/5 p-3">
+                <p className="text-[10px] uppercase tracking-[0.18em] text-emerald-300">Crecimiento B2B</p>
+                <p className="mt-1 text-right text-5xl font-black text-white">+120%</p>
+              </div>
+            </section>
+
+            <section className="mt-14 text-center">
+              <h3 className="text-5xl font-extrabold tracking-tight text-white">¿Listo para escalar?</h3>
+              <p className="mx-auto mt-4 max-w-[340px] text-[16px] text-slate-300">Únete a la élite del marketing B2B en España hoy mismo.</p>
+              <button
+                onClick={handleGoogleSignIn}
+                className="mt-6 w-full rounded-2xl bg-gradient-to-r from-emerald-400 to-emerald-500 px-5 py-4 text-lg font-extrabold text-[#03140f] shadow-[0_10px_30px_rgba(16,185,129,0.3)] transition hover:brightness-105"
+              >
+                <span className="inline-flex items-center gap-2">Empezar ahora <ArrowRight className="h-5 w-5" /></span>
+              </button>
+            </section>
+
+            <footer className="mt-12 border-t border-white/10 pt-8 text-center">
+              <div className="flex items-center justify-center gap-2 text-white">
+                <div className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-400 text-[#04120e]"><Bolt className="h-3.5 w-3.5" /></div>
+                <span className="text-lg font-extrabold">CM TRAFFIC STUDIO</span>
+              </div>
+              <div className="mt-5 flex items-center justify-center gap-5 text-[12px] text-slate-400">
+                <span>Privacidad</span>
+                <span>Términos</span>
+                <span>Seguridad</span>
+                <span>Contacto</span>
+              </div>
+              <p className="mt-6 text-[10px] uppercase tracking-[0.16em] text-slate-600">2024 CM Traffic Studio. Madrid, España.</p>
+            </footer>
           </div>
         </div>
       </div>

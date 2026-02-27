@@ -25,9 +25,11 @@ import {
   LayoutDashboard,
   SearchCode,
   UploadCloud,
-  Loader2
+  Loader2,
+  Zap
 } from 'lucide-react';
 import Toast from './Toast';
+import BulkNamingModal, { applyBulkNamingConfig } from './BulkNamingModal';
 
 const CreativeGrid: React.FC = () => {
   const { 
@@ -54,7 +56,10 @@ const CreativeGrid: React.FC = () => {
     fetchPlacements,
     fetchAds,
     assignCreativeToPlacement,
-    assignCreativeToAd
+    assignCreativeToAd,
+    creativesDrafts,
+    updateCreativeName,
+    publishSelectedCreativeDrafts
   } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
@@ -67,6 +72,8 @@ const CreativeGrid: React.FC = () => {
   const [bulkAssignAdId, setBulkAssignAdId] = useState('');
   const [bulkAssignMode, setBulkAssignMode] = useState<'add' | 'replace'>('add');
   const [isSelectAll, setIsSelectAll] = useState(false);
+  const [isBulkActionsOpen, setIsBulkActionsOpen] = useState(false);
+  const [isBulkNamingOpen, setIsBulkNamingOpen] = useState(false);
   
   // Naming Convention States
   const [namingMode, setNamingMode] = useState<'prefix' | 'suffix'>('suffix');
@@ -815,7 +822,13 @@ const CreativeGrid: React.FC = () => {
     }
   }, [isGlobalSearchActive, selectedAdvertiser, fetchAllCreatives]);
 
-  const filteredCreatives = creatives.filter(c => {
+  const displayCreatives = creatives.map((c) => ({
+    ...c,
+    ...(creativesDrafts[c.id] || {}),
+    isDraft: !!creativesDrafts[c.id],
+  }));
+
+  const filteredCreatives = displayCreatives.filter(c => {
     const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase());
     // If global search is active, we ignore the campaign filter
     if (isGlobalSearchActive) return matchesSearch;
@@ -823,6 +836,7 @@ const CreativeGrid: React.FC = () => {
     const matchesCampaign = !selectedCampaign || c.name.toLowerCase().includes(selectedCampaign.name.substring(0, 5).toLowerCase());
     return matchesSearch && matchesCampaign;
   });
+  const selectedDraftCount = Array.from(selectedCreatives).filter((id) => !!creativesDrafts[id]).length;
 
   const getIcon = (type: string) => {
     if (type.includes('HTML5') || type.includes('RICH_MEDIA')) return <FileCode className="w-5 h-5 text-amber-500" />;
@@ -868,9 +882,9 @@ const CreativeGrid: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-950/40">
+    <div className="view-root flex-1 flex flex-col h-full bg-slate-950/40">
       {/* Toolbar */}
-      <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-4 bg-slate-900/50 backdrop-blur-sm relative z-20">
+      <div className="view-toolbar p-4 border-b border-slate-800 flex items-center justify-between gap-4 bg-slate-900/50 backdrop-blur-sm relative z-20">
         <div className={`flex-1 max-w-md relative transition-all duration-300 ${isGlobalSearchActive ? 'ring-2 ring-blue-500/50 rounded-lg' : ''}`}>
           <Search className={`absolute left-3 top-2.5 w-4 h-4 ${isGlobalSearchActive ? 'text-blue-400' : 'text-slate-500'}`} />
           <input 
@@ -891,12 +905,12 @@ const CreativeGrid: React.FC = () => {
         
         <div className="flex items-center gap-2">
           {viewMode === 'list' && selectedCreatives.size > 0 && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600/10 border border-blue-500/20 mr-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400">{selectedCreatives.size} selected</span>
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-[#111f37] border border-[#2a4163] mr-2">
+              <span className="px-2.5 py-1 rounded-md bg-blue-600/15 border border-blue-500/30 text-xs font-semibold uppercase tracking-wide text-blue-300 whitespace-nowrap">{selectedCreatives.size} selected</span>
               <select
                 value={bulkAssignMode}
                 onChange={(e) => setBulkAssignMode(e.target.value as 'add' | 'replace')}
-                className="bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-[10px] text-slate-200"
+                className="bg-[#0b162a] border border-[#2a4163] rounded-md px-3 py-2 text-sm font-semibold text-slate-200 min-w-[130px]"
               >
                 <option value="add">Mode: Add</option>
                 <option value="replace">Mode: Replace</option>
@@ -904,7 +918,7 @@ const CreativeGrid: React.FC = () => {
               <select
                 value={bulkAssignAdId}
                 onChange={(e) => setBulkAssignAdId(e.target.value)}
-                className="bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-[10px] text-slate-200 min-w-[200px]"
+                className="bg-[#0b162a] border border-[#2a4163] rounded-md px-3 py-2 text-sm font-semibold text-slate-200 min-w-[300px]"
               >
                 <option value="">Select Ad...</option>
                 {campaignAds.map((ad) => (
@@ -915,11 +929,60 @@ const CreativeGrid: React.FC = () => {
               </select>
               <button
                 onClick={handleAssignSelectedToAd}
-                className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold transition-all"
+                className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-all shadow-lg shadow-blue-500/20"
               >
                 Assign to Ad
               </button>
+
+              <div className="relative z-[120]">
+                <button
+                  onClick={() => setIsBulkActionsOpen((prev) => !prev)}
+                  className="p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                  title="Bulk actions"
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </button>
+                {isBulkActionsOpen && (
+                  <div className="absolute right-0 top-10 w-52 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-[200] py-1">
+                    <button
+                      onClick={() => {
+                        setIsBulkNamingOpen(true);
+                        setIsBulkActionsOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2"
+                    >
+                      <Zap className="w-3.5 h-3.5" /> Bulk naming
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
+          )}
+
+          {viewMode === 'list' && selectedCreatives.size > 0 && (
+            <button
+              onClick={async () => {
+                const idsToPublish = Array.from(selectedCreatives).filter((id) => !!creativesDrafts[id]);
+                if (idsToPublish.length === 0) {
+                  setToast({ show: true, type: 'error', message: 'No draft naming changes selected', details: 'Apply Bulk naming first, then push to CM360.' });
+                  return;
+                }
+
+                setToast({ show: true, type: 'loading', message: `Publishing ${idsToPublish.length} creative drafts...` });
+                const result = await publishSelectedCreativeDrafts(idsToPublish);
+                setToast({
+                  show: true,
+                  type: result.failed === 0 ? 'success' : 'error',
+                  message: result.failed === 0 ? `Published ${result.success} naming changes` : `Published ${result.success}, failed ${result.failed}`,
+                });
+                setSelectedCreatives(new Set());
+              }}
+              disabled={selectedDraftCount === 0}
+              className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 rounded-lg text-sm font-semibold transition-all border border-emerald-500/30 disabled:opacity-50 disabled:grayscale"
+            >
+              <Zap className="w-4 h-4" />
+              Push to CM360 ({selectedDraftCount})
+            </button>
           )}
 
           <div className="flex p-1 bg-slate-950 rounded-lg border border-slate-800 mr-2">
@@ -938,29 +1001,12 @@ const CreativeGrid: React.FC = () => {
           </div>
           
           <button 
-            onClick={handleRefresh}
-            disabled={loading || !selectedAdvertiser}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-bold transition-all border border-slate-700 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Sync Assets
-          </button>
-
-          <button 
-            onClick={() => setIsErrorGuideOpen(true)}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded-lg border border-slate-700 transition-all"
-            title="Guía de errores"
-          >
-            <HelpCircle className="w-4 h-4" />
-          </button>
-
-          <button 
             onClick={() => {
               const input = document.getElementById('batch-upload-input');
               input?.click();
             }}
             disabled={!selectedAdvertiser}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:grayscale"
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 rounded-lg text-sm font-semibold transition-all border border-emerald-500/30 disabled:opacity-50 disabled:grayscale"
           >
             <UploadCloud className="w-4 h-4" />
             Batch Upload
@@ -970,7 +1016,7 @@ const CreativeGrid: React.FC = () => {
             <button 
               onClick={() => setIsNewMenuOpen(!isNewMenuOpen)}
               disabled={toast.type === 'loading' && toast.show}
-              className={`flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed`}
+              className={`flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed`}
             >
               {toast.type === 'loading' && toast.show ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
               New
@@ -1180,6 +1226,7 @@ const CreativeGrid: React.FC = () => {
                       <h4 className="text-xs font-bold text-slate-200 truncate" title={creative.name}>
                         {creative.name}
                       </h4>
+                      {creative.isDraft && <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold uppercase">Draft</span>}
                       <button 
                         onClick={() => handleCopy(creative.name, creative.id)}
                         className={`shrink-0 p-1 rounded transition-all ${
@@ -1206,7 +1253,7 @@ const CreativeGrid: React.FC = () => {
             ))}
           </div>
         ) : (
-          <div className="bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden">
+          <div className="list-surface bg-[#152542] border border-[#2a4163] rounded-2xl overflow-hidden">
             <table className="w-full text-left border-collapse">
               <colgroup>
                 <col style={{ width: 48 }} />
@@ -1218,11 +1265,11 @@ const CreativeGrid: React.FC = () => {
                 <col style={{ width: 64 }} />
               </colgroup>
               <thead>
-                <tr className="bg-slate-900 border-b border-slate-800">
+                <tr className="list-header-row bg-[#1b2d4d] border-b border-[#2a4163]">
                   <th className="p-4 w-12">
                     <input
                       type="checkbox"
-                      className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-blue-500/20 w-4 h-4 cursor-pointer"
+                      className="appearance-none w-4 h-4 rounded-full border border-slate-500 bg-transparent checked:bg-emerald-400 checked:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 cursor-pointer"
                       checked={filteredCreatives.length > 0 && selectedCreatives.size === filteredCreatives.length}
                       onChange={toggleSelectAllCreatives}
                     />
@@ -1235,13 +1282,13 @@ const CreativeGrid: React.FC = () => {
                   <th className="p-4 w-12"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/50">
+              <tbody className="divide-y divide-[#263a5b]">
                 {filteredCreatives.map((creative) => (
-                  <tr key={creative.id} className="group hover:bg-blue-600/[0.03] transition-colors">
+                  <tr key={creative.id} className="list-row group hover:bg-[#1b2d4d]/60 transition-colors">
                     <td className="p-4">
                       <input
                         type="checkbox"
-                        className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-blue-500/20 w-4 h-4 cursor-pointer"
+                        className="appearance-none w-4 h-4 rounded-full border border-slate-500 bg-transparent checked:bg-emerald-400 checked:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 cursor-pointer"
                         checked={selectedCreatives.has(creative.id)}
                         onChange={() => toggleSelectCreative(creative.id)}
                       />
@@ -1254,6 +1301,7 @@ const CreativeGrid: React.FC = () => {
                     <td className="p-4">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold text-slate-200">{creative.name}</span>
+                        {creative.isDraft && <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold uppercase">Draft</span>}
                         <button 
                           onClick={() => handleCopy(creative.name, creative.id)}
                           className={`p-1 rounded transition-all ${
@@ -1265,17 +1313,19 @@ const CreativeGrid: React.FC = () => {
                         </button>
                       </div>
                     </td>
-                    <td className="p-4 text-[10px] font-bold text-slate-500 uppercase tracking-wider">{creative.type.replace(/_/g, ' ')}</td>
+                    <td className="p-4 text-sm font-bold text-slate-300 uppercase tracking-wider">{creative.type.replace(/_/g, ' ')}</td>
                     <td className="p-4">
-                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-600/20 border border-blue-500/30 text-[10px] font-bold text-blue-200">
-                        <span className="w-1.5 h-1.5 rounded-sm bg-blue-400" />
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-700/40 border border-slate-500/40 text-sm font-bold text-slate-200">
+                        <span className="w-1.5 h-1.5 rounded-sm bg-slate-300" />
                         {creative.size}
                       </span>
                     </td>
                     <td className="p-4">
                       <div className="flex items-center gap-2">
-                        <div className={`w-1.5 h-1.5 rounded-full ${creative.status === 'Active' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-slate-600'}`} />
-                        <span className="text-[10px] font-bold uppercase text-slate-400">{creative.status}</span>
+                        <div className={`w-1.5 h-1.5 rounded-full ${creative.isDraft ? 'bg-amber-500' : creative.active ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-slate-600'}`} />
+                        <span className={`text-sm font-bold uppercase tracking-widest ${creative.isDraft ? 'text-amber-400' : creative.active ? 'text-emerald-400' : 'text-slate-300'}`}>
+                          {creative.isDraft ? 'Draft' : (creative.active ? 'Active' : 'Paused')}
+                        </span>
                       </div>
                     </td>
                     <td className="p-4">
@@ -1356,6 +1406,29 @@ const CreativeGrid: React.FC = () => {
         {...toast} 
         onClose={() => setToast(prev => ({ ...prev, show: false }))} 
       />
+
+      {isBulkNamingOpen && (
+        <BulkNamingModal
+          items={filteredCreatives.filter((c) => selectedCreatives.has(c.id)).map((c) => ({ id: c.id, name: c.name }))}
+          entityLabel="Creatives"
+          onClose={() => setIsBulkNamingOpen(false)}
+          onApply={(config) => {
+            filteredCreatives
+              .filter((c) => selectedCreatives.has(c.id))
+              .forEach((c) => {
+                updateCreativeName(c.id, applyBulkNamingConfig(c.name, config));
+              });
+            setToast({
+              show: true,
+              type: 'success',
+              message: 'Draft naming changes prepared',
+              details: 'Use Push to CM360 to publish selected draft changes.',
+            });
+            setIsBulkNamingOpen(false);
+            setIsBulkActionsOpen(false);
+          }}
+        />
+      )}
 
       {/* Upload Confirmation Modal */}
       {isUploadModalOpen && (
@@ -1624,7 +1697,7 @@ const CreativeGrid: React.FC = () => {
                 </button>
                 <button 
                   onClick={confirmUpload}
-                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20"
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-emerald-600/20"
                 >
                   {pendingFiles.length > 0 ? 'Start Batch' : 'Confirm & Upload'}
                 </button>
@@ -1726,7 +1799,7 @@ const CreativeGrid: React.FC = () => {
                 <button 
                   onClick={handleAssign}
                   disabled={!destAdvertiserId || isAssigning}
-                  className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {isAssigning ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm Copy'}
                 </button>
@@ -1784,7 +1857,7 @@ const CreativeGrid: React.FC = () => {
                     handleAssign();
                   }}
                   disabled={!destCampaignId || isAssigning}
-                  className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {isAssigning ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm Assignment'}
                 </button>
@@ -1840,7 +1913,7 @@ const CreativeGrid: React.FC = () => {
                 <button 
                   onClick={handleAssignToPlacement}
                   disabled={!destPlacementId || isAssigning}
-                  className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {isAssigning ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Ad'}
                 </button>

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="220" viewBox="0 0 760 220" fill="none">
+  <defs>
+    <filter id="glowMark" x="0" y="0" width="760" height="220" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.06 0 0 0 0 0.9 0 0 0 0 0.58 0 0 0 0.42 0" result="softGlow"/>
+      <feBlend mode="screen" in="softGlow" in2="SourceGraphic"/>
+    </filter>
+  </defs>
+  <g transform="translate(10,20)" filter="url(#glowMark)">
+    <polygon points="92,0 164,42 164,126 92,168 20,126 20,42" fill="none" stroke="#52F3A4" stroke-width="10" stroke-linejoin="round"/>
+    <polygon points="92,30 136,56 136,112 92,138 48,112 48,56" fill="none" stroke="#52F3A4" stroke-width="9" stroke-linejoin="round"/>
+    <polygon points="92,58 111,69 111,91 92,102 73,91 73,69" fill="none" stroke="#52F3A4" stroke-width="7" stroke-linejoin="round"/>
+  </g>
+  <g transform="translate(220,42)" filter="url(#glowMark)">
+    <text x="0" y="70" fill="#F8FAFC" font-family="Manrope, Inter, sans-serif" font-size="78" font-weight="800" letter-spacing="0.6">CM TRAFFIC</text>
+    <text x="0" y="146" fill="#52F3A4" font-family="Manrope, Inter, sans-serif" font-size="78" font-weight="800" letter-spacing="0.6">STUDIO</text>
+  </g>
+</svg>

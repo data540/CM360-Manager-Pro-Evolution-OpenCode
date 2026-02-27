@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="240" viewBox="0 0 820 240" fill="none">
+  <g transform="translate(14,20)">
+    <polygon points="98,0 176,45 176,135 98,180 20,135 20,45" fill="none" stroke="#0A8A58" stroke-width="11" stroke-linejoin="round"/>
+    <polygon points="98,33 145,60 145,120 98,147 51,120 51,60" fill="none" stroke="#0A8A58" stroke-width="10" stroke-linejoin="round"/>
+    <polygon points="98,63 119,75 119,99 98,111 77,99 77,75" fill="none" stroke="#0A8A58" stroke-width="7" stroke-linejoin="round"/>
+  </g>
+
+  <g transform="translate(236,40)">
+    <text x="0" y="78" fill="#25334C" font-family="Manrope, Inter, sans-serif" font-size="88" font-weight="800" letter-spacing="0.8">CM TRAFFIC</text>
+    <text x="0" y="162" fill="#0F9E66" font-family="Manrope, Inter, sans-serif" font-size="88" font-weight="800" letter-spacing="0.8">STUDIO</text>
+  </g>
+</svg>

@@ -16,7 +16,9 @@ interface AppContextType {
   placements: Placement[];
   placementsDrafts: { [id: string]: Placement };
   ads: Ad[];
+  adsDrafts: { [id: string]: Partial<Ad> & { isDraft?: boolean } };
   creatives: Creative[];
+  creativesDrafts: { [id: string]: Partial<Creative> & { isDraft?: boolean } };
   sites: Site[];
   landingPages: { id: string, name: string, url: string }[];
   
@@ -37,8 +39,14 @@ interface AppContextType {
   updatePlacement: (placement: Placement) => void;
   updatePlacementDraft: (placementId: string, changes: Partial<Placement>) => void;
   updatePlacementName: (placementId: string, newName: string) => void;
+  updateAdDraft: (adId: string, changes: Partial<Ad>) => void;
+  updateCreativeDraft: (creativeId: string, changes: Partial<Creative>) => void;
+  updateAdName: (adId: string, newName: string) => void;
+  updateCreativeName: (creativeId: string, newName: string) => void;
   deletePlacement: (id: string) => void;
   publishSelectedDrafts: (placementIds: string[]) => Promise<{success: number, failed: number, results: {id: string, success: boolean, error?: string}[]}>;
+  publishSelectedAdDrafts: (adIds: string[]) => Promise<{success: number, failed: number, results: {id: string, success: boolean, error?: string}[]}>;
+  publishSelectedCreativeDrafts: (creativeIds: string[]) => Promise<{success: number, failed: number, results: {id: string, success: boolean, error?: string}[]}>;
   
   connectionStatus: 'Connected' | 'Disconnected' | 'Connecting';
   isAuthenticated: boolean;
@@ -107,7 +115,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [placements, setPlacements] = useState<Placement[]>([]);
   const [placementsDrafts, setPlacementsDrafts] = useState<{ [id: string]: Placement }>({});
   const [ads, setAds] = useState<Ad[]>([]);
+  const [adsDrafts, setAdsDrafts] = useState<{ [id: string]: Partial<Ad> & { isDraft?: boolean } }>({});
   const [creatives, setCreatives] = useState<Creative[]>([]);
+  const [creativesDrafts, setCreativesDrafts] = useState<{ [id: string]: Partial<Creative> & { isDraft?: boolean } }>({});
   const [sites, setSites] = useState<Site[]>([]);
   const [landingPages, setLandingPages] = useState<{ id: string, name: string, url: string }[]>([]);
   
@@ -324,6 +334,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setPlacements([]);
       setPlacementsDrafts({});
       setAds([]);
+      setAdsDrafts({});
       setSelectedAd(null);
     }
   }, [selectedAdvertiser, selectedCampaign, isAuthenticated, accessToken, profileId]);
@@ -408,9 +419,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           };
         });
         setCreatives(mappedCreatives);
+        setCreativesDrafts({});
         console.log(`✅ ${mappedCreatives.length} creatividades cargadas.`);
       } else {
         setCreatives([]);
+        setCreativesDrafts({});
         console.log("ℹ️ No se encontraron creatividades para este anunciante.");
       }
     } catch (e) {
@@ -457,6 +470,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       }
       setCreatives(allCreatives);
+      setCreativesDrafts({});
       console.log(`✅ ${allCreatives.length} creatividades cargadas globalmente.`);
     } catch (e) {
       console.error("Fetch all creatives error:", e);
@@ -958,10 +972,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         : mappedAds;
 
       setAds(filtered);
+      setAdsDrafts({});
       setSelectedAd(prev => (prev && filtered.some(ad => ad.id === prev.id)) ? prev : null);
     } catch (e) {
       console.error('Fetch ads error:', e);
       setAds([]);
+      setAdsDrafts({});
     } finally {
       setIsAdsLoading(false);
     }
@@ -1005,6 +1021,104 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     if (successCount > 0 && selectedAdvertiser) {
       await fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
+    }
+
+    return { success: successCount, failed: failedCount, error: lastError };
+  };
+
+  const bulkRenameCreatives = async (items: { id: string; name: string }[]) => {
+    if (!accessToken || !profileId) return { success: 0, failed: items.length, error: 'No connection' };
+
+    let successCount = 0;
+    let failedCount = 0;
+    let lastError = '';
+
+    for (const item of items) {
+      try {
+        const attempts: Array<{ url: string; body: any; label: string }> = [
+          {
+            url: `/api/cm360/userprofiles/${profileId}/creatives/${item.id}?updateMask=name`,
+            body: { id: item.id, name: item.name },
+            label: 'patch.byPath',
+          },
+          {
+            url: `/api/cm360/userprofiles/${profileId}/creatives?id=${encodeURIComponent(item.id)}`,
+            body: { id: item.id, name: item.name },
+            label: 'patch.byQuery',
+          },
+        ];
+
+        let renamed = false;
+        for (const attempt of attempts) {
+          const res = await fetch(attempt.url, {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(attempt.body)
+          });
+
+          if (res.ok) {
+            renamed = true;
+            break;
+          }
+
+          const data = await res.json().catch(() => ({}));
+          lastError = data?.error?.message || `Creative rename failed (${res.status}) [${attempt.label}]`;
+        }
+
+        if (renamed) {
+          successCount++;
+        } else {
+          failedCount++;
+        }
+      } catch (e: any) {
+        failedCount++;
+        lastError = e.message || 'Network error';
+      }
+    }
+
+    if (successCount > 0 && selectedAdvertiser) {
+      await fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
+    }
+
+    return { success: successCount, failed: failedCount, error: lastError };
+  };
+
+  const bulkRenameAds = async (items: { id: string; name: string }[]) => {
+    if (!accessToken || !profileId) return { success: 0, failed: items.length, error: 'No connection' };
+
+    let successCount = 0;
+    let failedCount = 0;
+    let lastError = '';
+
+    for (const item of items) {
+      try {
+        const res = await fetch(`/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(item.id)}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ id: item.id, name: item.name })
+        });
+
+        if (res.ok) {
+          successCount++;
+        } else {
+          failedCount++;
+          const data = await res.json().catch(() => ({}));
+          lastError = data?.error?.message || `Ad rename failed (${res.status})`;
+        }
+      } catch (e: any) {
+        failedCount++;
+        lastError = e.message || 'Network error';
+      }
+    }
+
+    if (successCount > 0 && selectedCampaign) {
+      await fetchAds(selectedCampaign.id);
     }
 
     return { success: successCount, failed: failedCount, error: lastError };
@@ -1525,6 +1639,153 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     updatePlacementDraft(placementId, { name: newName });
   };
 
+  const updateAdDraft = (adId: string, changes: Partial<Ad>) => {
+    setAdsDrafts(prev => {
+      const original = ads.find(a => a.id === adId);
+      const currentDraft = prev[adId] || original;
+      if (!currentDraft) return prev;
+
+      return {
+        ...prev,
+        [adId]: { ...currentDraft, ...changes, isDraft: true }
+      };
+    });
+  };
+
+  const updateCreativeDraft = (creativeId: string, changes: Partial<Creative>) => {
+    setCreativesDrafts(prev => {
+      const original = creatives.find(c => c.id === creativeId);
+      const currentDraft = prev[creativeId] || original;
+      if (!currentDraft) return prev;
+
+      return {
+        ...prev,
+        [creativeId]: { ...currentDraft, ...changes, isDraft: true }
+      };
+    });
+  };
+
+  const updateAdName = (adId: string, newName: string) => {
+    updateAdDraft(adId, { name: newName });
+  };
+
+  const updateCreativeName = (creativeId: string, newName: string) => {
+    updateCreativeDraft(creativeId, { name: newName });
+  };
+
+  const publishSelectedAdDrafts = async (adIds: string[]) => {
+    if (!accessToken || !profileId) return { success: 0, failed: adIds.length, results: [] as {id: string, success: boolean, error?: string}[] };
+
+    let successCount = 0;
+    let failedCount = 0;
+    const results: {id: string, success: boolean, error?: string}[] = [];
+
+    for (const id of adIds) {
+      const draft = adsDrafts[id];
+      if (!draft || !draft.name) continue;
+
+      try {
+        const res = await fetch(`/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ id, name: draft.name })
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          successCount++;
+          results.push({ id, success: true });
+
+          setAds(prev => prev.map(ad => ad.id === id ? { ...ad, name: draft.name as string, isDraft: false } : ad));
+          setAdsDrafts(prev => {
+            const next = { ...prev };
+            delete next[id];
+            return next;
+          });
+        } else {
+          failedCount++;
+          results.push({ id, success: false, error: data?.error?.message || `API Error ${res.status}` });
+        }
+      } catch (e: any) {
+        failedCount++;
+        results.push({ id, success: false, error: e.message || 'Network error' });
+      }
+    }
+
+    return { success: successCount, failed: failedCount, results };
+  };
+
+  const publishSelectedCreativeDrafts = async (creativeIds: string[]) => {
+    if (!accessToken || !profileId) return { success: 0, failed: creativeIds.length, results: [] as {id: string, success: boolean, error?: string}[] };
+
+    let successCount = 0;
+    let failedCount = 0;
+    const results: {id: string, success: boolean, error?: string}[] = [];
+
+    for (const id of creativeIds) {
+      const draft = creativesDrafts[id];
+      if (!draft || !draft.name) continue;
+
+      try {
+        const attempts: Array<{ url: string; body: any }> = [
+          {
+            url: `/api/cm360/userprofiles/${profileId}/creatives/${id}?updateMask=name`,
+            body: { id, name: draft.name }
+          },
+          {
+            url: `/api/cm360/userprofiles/${profileId}/creatives?id=${encodeURIComponent(id)}`,
+            body: { id, name: draft.name }
+          }
+        ];
+
+        let renamed = false;
+        let lastError = '';
+
+        for (const attempt of attempts) {
+          const res = await fetch(attempt.url, {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(attempt.body)
+          });
+
+          if (res.ok) {
+            renamed = true;
+            break;
+          }
+
+          const data = await res.json().catch(() => ({}));
+          lastError = data?.error?.message || `Creative rename failed (${res.status})`;
+        }
+
+        if (renamed) {
+          successCount++;
+          results.push({ id, success: true });
+
+          setCreatives(prev => prev.map(c => c.id === id ? { ...c, name: draft.name as string, isDraft: false } : c));
+          setCreativesDrafts(prev => {
+            const next = { ...prev };
+            delete next[id];
+            return next;
+          });
+        } else {
+          failedCount++;
+          results.push({ id, success: false, error: lastError || 'Unknown error' });
+        }
+      } catch (e: any) {
+        failedCount++;
+        results.push({ id, success: false, error: e.message || 'Network error' });
+      }
+    }
+
+    return { success: successCount, failed: failedCount, results };
+  };
+
   const publishSelectedDrafts = async (placementIds: string[]) => {
     if (!accessToken || !profileId) return { success: 0, failed: placementIds.length, results: [] };
     
@@ -1631,10 +1892,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   return (
     <AppContext.Provider value={{
-      advertisers, campaigns, campaignsDrafts, placements, placementsDrafts, ads, creatives, sites, landingPages,
+      advertisers, campaigns, campaignsDrafts, placements, placementsDrafts, ads, adsDrafts, creatives, creativesDrafts, sites, landingPages,
       selectedAdvertiser, selectedCampaign, selectedAd, currentView, isGlobalSearchActive,
       setSelectedAdvertiser, setSelectedCampaign, setSelectedAd, setCurrentView, setIsGlobalSearchActive,
-      addPlacements, updateCampaignDraft, updatePlacement, updatePlacementDraft, updatePlacementName, deletePlacement, publishSelectedDrafts,
+      addPlacements, updateCampaignDraft, updatePlacement, updatePlacementDraft, updatePlacementName, updateAdDraft, updateCreativeDraft, updateAdName, updateCreativeName, deletePlacement, publishSelectedDrafts, publishSelectedAdDrafts, publishSelectedCreativeDrafts,
       connectionStatus, isAuthenticated, accessToken, profileId, accountId, user, login, loginWithToken, enterDemoMode, logout,
       fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchAds, fetchCreatives, fetchAllCreatives, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, pushCampaigns, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement, assignCreativeToAd, unassignCreativeFromAd, isAdsLoading
     }}>

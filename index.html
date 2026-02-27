@@ -9,14 +9,24 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
+        html {
+            font-size: 18px;
+        }
+
         body {
-            font-family: 'Inter', sans-serif;
+            font-family: 'Manrope', sans-serif;
             background-color: #020617;
             color: #f8fafc;
             margin: 0;
             overflow: hidden;
+            font-size: 16px;
+            line-height: 1.55;
+            letter-spacing: 0.01em;
+            text-rendering: optimizeLegibility;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
         .font-mono {
             font-family: 'JetBrains Mono', monospace;
@@ -43,6 +53,211 @@
         @keyframes loading {
             0% { transform: translateX(-100%); }
             100% { transform: translateX(100%); }
+        }
+
+        @keyframes heroLogoFloat {
+            0% { transform: translateY(0px) scale(1); filter: drop-shadow(0 0 0 rgba(82, 243, 164, 0.0)); }
+            50% { transform: translateY(-4px) scale(1.01); filter: drop-shadow(0 0 14px rgba(82, 243, 164, 0.28)); }
+            100% { transform: translateY(0px) scale(1); filter: drop-shadow(0 0 0 rgba(82, 243, 164, 0.0)); }
+        }
+
+        .hero-logo-anim-wrap {
+            position: relative;
+            border: 1px solid rgba(82, 243, 164, 0.18);
+            border-radius: 14px;
+            padding: 10px;
+            background: radial-gradient(circle at 30% 50%, rgba(82, 243, 164, 0.1), rgba(8, 10, 12, 0));
+        }
+
+        .hero-logo-anim {
+            animation: heroLogoFloat 3.2s ease-in-out infinite;
+        }
+
+        .logo-light {
+            display: none;
+        }
+
+        .theme-light {
+            background: #f3f5f9 !important;
+            color: #0f172a !important;
+        }
+
+        .theme-light .logo-dark {
+            display: none !important;
+        }
+
+        .theme-light .logo-light {
+            display: block !important;
+            height: 76px !important;
+            max-width: 100% !important;
+        }
+
+        .theme-light .top-header {
+            background: rgba(255, 255, 255, 0.85) !important;
+            border-color: #dbe3ef !important;
+        }
+
+        .theme-light .header-breadcrumb,
+        .theme-light .header-breadcrumb .text-slate-500,
+        .theme-light .header-breadcrumb .text-slate-400 {
+            color: #64748b !important;
+        }
+
+        .theme-light .header-breadcrumb .text-blue-500 {
+            color: #2563eb !important;
+        }
+
+        .theme-light .header-breadcrumb svg {
+            color: #94a3b8 !important;
+        }
+
+        .theme-light .top-header .text-blue-500,
+        .theme-light .top-header .text-blue-400 {
+            color: #2563eb !important;
+        }
+
+        .theme-light .sidebar-shell {
+            background: #eef2f7 !important;
+            border-color: #d6deea !important;
+        }
+
+        .theme-light .sidebar-shell .sidebar-brand {
+            background: #ffffff !important;
+            border-color: #d0dae8 !important;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+        }
+
+        .theme-light .sidebar-shell h1,
+        .theme-light .sidebar-shell .text-slate-100,
+        .theme-light .sidebar-shell .text-slate-300 {
+            color: #1e293b !important;
+        }
+
+        .theme-light .sidebar-shell .sidebar-card {
+            background: #e9eef6 !important;
+            border-color: #d6deea !important;
+            border-radius: 12px;
+            padding: 8px;
+        }
+
+        .theme-light .sidebar-shell .status-card {
+            background: #ffffff !important;
+            border-color: #d0dae8 !important;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+        }
+
+        .theme-light .sidebar-shell .status-card .text-slate-300,
+        .theme-light .sidebar-shell .status-card .text-slate-400 {
+            color: #475569 !important;
+        }
+
+        .theme-light .sidebar-shell .status-card .text-slate-500,
+        .theme-light .sidebar-shell .status-card .text-slate-600 {
+            color: #64748b !important;
+        }
+
+        .theme-light .sidebar-shell .status-card .text-emerald-500 {
+            color: #10b981 !important;
+        }
+
+        .theme-light .sidebar-shell .sidebar-nav-btn {
+            color: #64748b !important;
+            border-color: transparent !important;
+        }
+
+        .theme-light .sidebar-shell .sidebar-nav-btn:hover {
+            background: #e5ebf4 !important;
+            color: #1e293b !important;
+        }
+
+        .theme-light .sidebar-shell .sidebar-nav-active {
+            background: linear-gradient(90deg, rgba(16, 185, 129, 0.16), rgba(16, 185, 129, 0.03)) !important;
+            border-color: rgba(16, 185, 129, 0.45) !important;
+            color: #059669 !important;
+        }
+
+        .theme-light .sidebar-shell input,
+        .theme-light .sidebar-shell select {
+            background: #ffffff !important;
+            color: #0f172a !important;
+            border-color: #c7d2e3 !important;
+        }
+
+        .theme-light .view-root {
+            background: #f3f5f9 !important;
+        }
+
+        .theme-light .view-toolbar {
+            background: #f8fbff !important;
+            border-color: #dbe3ef !important;
+        }
+
+        .theme-light .view-toolbar input,
+        .theme-light .view-toolbar select {
+            background: #ffffff !important;
+            color: #0f172a !important;
+            border-color: #cbd5e1 !important;
+        }
+
+        .theme-light .view-toolbar input::placeholder {
+            color: #94a3b8 !important;
+        }
+
+        .theme-light .list-surface {
+            background: #ffffff !important;
+            border-color: #d0dae8 !important;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+        }
+
+        .theme-light .list-header-row {
+            background: #edf2f8 !important;
+            border-color: #d0dae8 !important;
+        }
+
+        .theme-light .list-row {
+            border-color: #e2e8f0 !important;
+        }
+
+        .theme-light .list-row:hover {
+            background: #f8fafc !important;
+        }
+
+        .theme-light .list-row-selected {
+            background: #eef6ff !important;
+        }
+
+        .theme-light input[type="checkbox"] {
+            border-color: #94a3b8 !important;
+            background: transparent !important;
+        }
+
+        .theme-light input[type="checkbox"]:checked {
+            background: #10b981 !important;
+            border-color: #10b981 !important;
+        }
+
+        .theme-light .text-slate-100,
+        .theme-light .text-slate-200,
+        .theme-light .text-slate-300 {
+            color: #0f172a !important;
+        }
+
+        .theme-light .text-slate-400,
+        .theme-light .text-slate-500,
+        .theme-light .text-slate-600 {
+            color: #64748b !important;
+        }
+
+        .theme-light .text-emerald-300,
+        .theme-light .text-emerald-400,
+        .theme-light .text-emerald-500 {
+            color: #059669 !important;
+        }
+
+        .theme-light .header-profileid {
+            background: #f8fafc !important;
+            border-color: #d0dae8 !important;
+            color: #64748b !important;
         }
     </style>
 <script type="importmap">

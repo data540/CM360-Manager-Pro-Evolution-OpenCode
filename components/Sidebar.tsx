@@ -7,14 +7,12 @@ import {
   Layers, 
   Image as ImageIcon, 
   Megaphone,
-  Cpu, 
   Settings as SettingsIcon,
   ChevronDown,
   Circle,
   Database,
   RefreshCw,
-  Plus,
-  ExternalLink
+  Plus
 } from 'lucide-react';
 import Toast from './Toast';
 
@@ -121,7 +119,6 @@ const Sidebar: React.FC = () => {
     { type: 'Placements', icon: Layers, label: 'Placements' },
     { type: 'Ads', icon: Megaphone, label: 'Ads' },
     { type: 'Creatives', icon: ImageIcon, label: 'Creatives' },
-    { type: 'AIHelper', icon: Cpu, label: 'AI Helper' },
     { type: 'Settings', icon: SettingsIcon, label: 'Settings' },
   ];
 
@@ -137,22 +134,34 @@ const Sidebar: React.FC = () => {
     : [];
 
   return (
-    <div className="w-72 h-full flex flex-col glass border-r border-slate-800 p-4 shrink-0 overflow-y-auto">
-      <div className="flex items-center gap-3 mb-8 px-2">
-        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-white italic shadow-lg shadow-blue-500/20">CP</div>
-        <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-400">
-          CM360 Pro
-        </h1>
+    <div className="sidebar-shell w-72 h-full flex flex-col bg-[#14233c] border-r border-[#2a4163] p-4 shrink-0 overflow-y-auto">
+      <div className="sidebar-brand flex items-center mb-8 px-3 py-3 rounded-xl border border-[#2a4163] bg-[#162949] min-h-[88px]">
+        <img
+          src="/cm-traffic-studio-mark-dark.svg"
+          alt="CM Traffic Studio"
+          className="logo-dark h-16 w-full object-contain object-left"
+          onError={(e) => {
+            e.currentTarget.style.display = 'none';
+          }}
+        />
+        <img
+          src="/cm-traffic-studio-logo.svg"
+          alt="CM Traffic Studio"
+          className="logo-light h-16 w-full object-contain object-left hidden"
+          onError={(e) => {
+            e.currentTarget.style.display = 'none';
+          }}
+        />
       </div>
 
       <div className="mb-6 space-y-4">
-        <div className="relative">
+        <div className="relative sidebar-card">
           <div className="flex justify-between items-center mb-1 px-2">
-            <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">CM360 Advertiser</label>
+            <label className="text-xs uppercase tracking-[0.14em] text-slate-400 font-bold">CM360 Advertiser</label>
             {advertisers.length === 0 && connectionStatus === 'Connected' && (
               <button 
                 onClick={fetchAdvertisers}
-                className="text-[9px] text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                className="text-[9px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
                 title="Sincronizar de nuevo"
               >
                 <RefreshCw className="w-2.5 h-2.5" /> SYNC
@@ -162,14 +171,14 @@ const Sidebar: React.FC = () => {
           <div className="space-y-1.5">
             <input 
               type="text"
-              placeholder="Filter advertisers..."
-              className="w-full bg-slate-950/50 border border-slate-800 text-slate-400 text-[10px] rounded-md py-1.5 px-3 focus:outline-none focus:border-blue-500/50 transition-colors"
+              placeholder="Find advertisers..."
+              className="w-full bg-[#0e1d35] border border-[#2a4163] text-slate-200 text-sm rounded-md py-2 px-3 focus:outline-none focus:border-emerald-500/50 transition-colors placeholder:text-slate-500"
               value={advertiserSearch}
               onChange={(e) => setAdvertiserSearch(e.target.value)}
             />
             <div className="relative">
               <select 
-                className="w-full bg-slate-900/50 border border-slate-700 text-slate-200 text-sm rounded-md py-2 px-3 appearance-none focus:outline-none focus:border-blue-500 transition-colors"
+                className="w-full bg-[#10213c] border border-[#2a4163] text-slate-100 text-base font-semibold rounded-md py-2.5 px-3 appearance-none focus:outline-none focus:border-emerald-500 transition-colors"
                 value={selectedAdvertiser?.id || ''}
                 onChange={(e) => {
                   const adv = advertisers.find(a => a.id === e.target.value);
@@ -186,9 +195,9 @@ const Sidebar: React.FC = () => {
           </div>
         </div>
 
-        <div className="relative">
+        <div className="relative sidebar-card">
           <div className="flex justify-between items-center mb-1 px-2">
-            <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Active Campaign</label>
+            <label className="text-xs uppercase tracking-[0.14em] text-slate-400 font-bold">Active Campaign</label>
             <div className="flex gap-2">
               {selectedAdvertiser && connectionStatus === 'Connected' && (
                 <button 
@@ -199,7 +208,7 @@ const Sidebar: React.FC = () => {
                     setNewCampaignEndDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
                     if (selectedAdvertiser) fetchLandingPages(selectedAdvertiser.id);
                   }}
-                  className="text-[9px] text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                  className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold"
                   title="Crear campaña"
                 >
                   <Plus className="w-2.5 h-2.5" /> CREATE
@@ -211,15 +220,15 @@ const Sidebar: React.FC = () => {
             <input 
               type="text"
               disabled={!selectedAdvertiser}
-              placeholder="Filter campaigns..."
-              className="w-full bg-slate-950/50 border border-slate-800 text-slate-400 text-[10px] rounded-md py-1.5 px-3 focus:outline-none focus:border-blue-500/50 transition-colors disabled:opacity-50"
+              placeholder="Find campaigns..."
+              className="w-full bg-[#0e1d35] border border-[#2a4163] text-slate-200 text-sm rounded-md py-2 px-3 focus:outline-none focus:border-emerald-500/50 transition-colors disabled:opacity-50 placeholder:text-slate-500"
               value={campaignSearch}
               onChange={(e) => setCampaignSearch(e.target.value)}
             />
             <div className="relative">
               <select 
                 disabled={!selectedAdvertiser}
-                className="w-full bg-slate-900/50 border border-slate-700 text-slate-200 text-sm rounded-md py-2 px-3 appearance-none focus:outline-none focus:border-blue-500 disabled:opacity-50 transition-colors"
+                className="w-full bg-[#10213c] border border-[#2a4163] text-slate-100 text-base font-semibold rounded-md py-2.5 px-3 appearance-none focus:outline-none focus:border-emerald-500 disabled:opacity-50 transition-colors"
                 value={selectedCampaign?.id || ''}
                 onChange={(e) => {
                   const camp = campaigns.find(c => c.id === e.target.value);
@@ -241,10 +250,10 @@ const Sidebar: React.FC = () => {
           <button
             key={item.type}
             onClick={() => setCurrentView(item.type)}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all ${
+            className={`sidebar-nav-btn w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-semibold transition-all ${
               currentView === item.type 
-                ? 'bg-blue-600/10 text-blue-400 border border-blue-500/20 shadow-sm shadow-blue-500/10' 
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                ? 'sidebar-nav-active bg-emerald-500/14 text-emerald-300 border border-emerald-500/35 shadow-[inset_0_1px_0_rgba(16,185,129,0.15)]' 
+                : 'text-slate-300 hover:text-slate-100 hover:bg-[#1a2f51]'
             }`}
           >
             <item.icon className="w-5 h-5" />
@@ -253,12 +262,12 @@ const Sidebar: React.FC = () => {
         ))}
       </nav>
 
-      <div className="mt-auto pt-6 border-t border-slate-800/50">
-        <div className="bg-slate-900/40 rounded-xl p-3 border border-slate-800/50">
+      <div className="mt-auto pt-6 border-t border-[#2a4163]">
+        <div className="status-card bg-[#162949] rounded-xl p-3 border border-[#2a4163]">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <Database className="w-3.5 h-3.5 text-slate-500" />
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">CM360 Link</span>
+              <Database className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">CM360 Link</span>
             </div>
             <div className="relative">
               <Circle className={`w-2 h-2 fill-current ${
@@ -269,7 +278,7 @@ const Sidebar: React.FC = () => {
               }`} />
             </div>
           </div>
-          <p className="text-[11px] text-slate-400">
+          <p className="text-[11px] text-slate-300">
             {connectionStatus === 'Connected' ? 'Synchronized with Live API' : 'Initializing sync...'}
           </p>
         </div>
@@ -318,8 +327,8 @@ const Sidebar: React.FC = () => {
                         checked={isEuPolitical === true}
                         onChange={() => setIsEuPolitical(true)}
                       />
-                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${isEuPolitical === true ? 'border-blue-500 bg-blue-500/20' : 'border-slate-700 bg-slate-950'}`}>
-                        {isEuPolitical === true && <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${isEuPolitical === true ? 'border-emerald-500 bg-emerald-500/20' : 'border-slate-700 bg-slate-950'}`}>
+                        {isEuPolitical === true && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
                       </div>
                     </div>
                     <div>
@@ -339,8 +348,8 @@ const Sidebar: React.FC = () => {
                         checked={isEuPolitical === false}
                         onChange={() => setIsEuPolitical(false)}
                       />
-                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${isEuPolitical === false ? 'border-blue-500 bg-blue-500/20' : 'border-slate-700 bg-slate-950'}`}>
-                        {isEuPolitical === false && <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${isEuPolitical === false ? 'border-emerald-500 bg-emerald-500/20' : 'border-slate-700 bg-slate-950'}`}>
+                        {isEuPolitical === false && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
                       </div>
                     </div>
                     <div>
@@ -355,7 +364,7 @@ const Sidebar: React.FC = () => {
                   <label className="block text-[10px] uppercase font-bold text-slate-500">Landing Page</label>
                   <button 
                     onClick={() => setIsCustomLandingPage(!isCustomLandingPage)}
-                    className="text-[10px] text-blue-400 hover:text-blue-300 font-bold"
+                    className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold"
                   >
                     {isCustomLandingPage ? 'Select from list' : 'Enter manually'}
                   </button>
@@ -396,7 +405,7 @@ const Sidebar: React.FC = () => {
                 <button 
                   onClick={handleCreateCampaign}
                   disabled={!newCampaignName || !newCampaignEndDate || (isCustomLandingPage ? !customLandingPageUrl : !selectedLandingPageId) || (toast.type === 'loading' && toast.show)}
-                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20 disabled:opacity-50"
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50"
                 >
                   {toast.type === 'loading' && toast.show ? <RefreshCw className="w-4 h-4 animate-spin mx-auto" /> : 'Create Campaign'}
                 </button>
