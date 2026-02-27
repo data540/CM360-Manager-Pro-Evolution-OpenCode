@@ -65,6 +65,7 @@ const CreativeGrid: React.FC = () => {
   const [isNewMenuOpen, setIsNewMenuOpen] = useState(false);
   const [selectedCreatives, setSelectedCreatives] = useState<Set<string>>(new Set());
   const [bulkAssignAdId, setBulkAssignAdId] = useState('');
+  const [bulkAssignMode, setBulkAssignMode] = useState<'add' | 'replace'>('add');
   const [isSelectAll, setIsSelectAll] = useState(false);
   
   // Naming Convention States
@@ -89,6 +90,7 @@ const CreativeGrid: React.FC = () => {
   const [selectedFormat, setSelectedFormat] = useState('Display');
   const [selectedSize, setSelectedSize] = useState('');
   const [uploadAdId, setUploadAdId] = useState('');
+  const [uploadAssignMode, setUploadAssignMode] = useState<'add' | 'replace'>('add');
   const [batchAssignmentMode, setBatchAssignmentMode] = useState<'auto' | 'single' | 'none'>('auto');
   const [batchPlans, setBatchPlans] = useState<Array<{
     file: File;
@@ -103,6 +105,13 @@ const CreativeGrid: React.FC = () => {
   const [manualPlanIndex, setManualPlanIndex] = useState<number | null>(null);
   const [applyManualSelectionToSameSize, setApplyManualSelectionToSameSize] = useState(true);
   const [isErrorGuideOpen, setIsErrorGuideOpen] = useState(false);
+  const [listColumnWidths, setListColumnWidths] = useState({
+    preview: 110,
+    name: 420,
+    type: 180,
+    size: 170,
+    status: 150,
+  });
 
   const isDefaultAd = (ad: Ad) => /default/i.test(ad.name || '');
 
@@ -110,6 +119,22 @@ const CreativeGrid: React.FC = () => {
     ? ads.filter((ad) => ad.campaignId === selectedCampaign.id)
     : [];
   const selectableCampaignAds = campaignAds.filter((ad) => !isDefaultAd(ad));
+
+  const startListResize = (column: keyof typeof listColumnWidths, startX: number, startWidth: number) => {
+    const onMouseMove = (event: MouseEvent) => {
+      const delta = event.clientX - startX;
+      setListColumnWidths((prev) => ({
+        ...prev,
+        [column]: Math.max(100, Math.min(650, startWidth + delta)),
+      }));
+    };
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
 
   useEffect(() => {
     if (activeModal === 'campaign' && destAdvertiserId) {
@@ -294,7 +319,7 @@ const CreativeGrid: React.FC = () => {
             ? uploadAdId
             : null;
         if (adToAssign && result.id) {
-          const assignResult = await assignCreativeToAd(result.id, adToAssign, selectedCampaign?.id);
+          const assignResult = await assignCreativeToAd(result.id, adToAssign, selectedCampaign?.id, uploadAssignMode);
           if (!assignResult.success) {
             assignFailCount++;
             if (!firstAssignError) firstAssignError = assignResult.error || 'Unknown assignment error';
@@ -354,6 +379,7 @@ const CreativeGrid: React.FC = () => {
       setSelectedFormat('Display');
       setSelectedSize(CREATIVE_SPECS['Display'][0]);
       setUploadAdId('');
+      setUploadAssignMode('add');
       setBatchAssignmentMode('auto');
       setIsUploadModalOpen(true);
     } else {
@@ -378,6 +404,7 @@ const CreativeGrid: React.FC = () => {
         setSelectedSize(CREATIVE_SPECS[initialFormat][0]);
       }
       setUploadAdId('');
+      setUploadAssignMode('add');
       
       setIsUploadModalOpen(true);
     }
@@ -425,6 +452,11 @@ const CreativeGrid: React.FC = () => {
         details: 'Default Ads are shown in gray and are not eligible for direct assignment. Choose another Ad.'
       });
       return;
+    }
+
+    if (uploadAdId && uploadAssignMode === 'replace') {
+      const confirmed = window.confirm('Replace mode will overwrite current creative assignments in the selected Ad. Continue?');
+      if (!confirmed) return;
     }
 
     if (isBatch && batchAssignmentMode === 'single' && !uploadAdId) {
@@ -493,7 +525,7 @@ const CreativeGrid: React.FC = () => {
         let adAssignmentError = '';
         let adAssignmentSuccess = '';
         if (uploadAdId && result.id) {
-          const assignResult = await assignCreativeToAd(result.id, uploadAdId, selectedCampaign?.id);
+          const assignResult = await assignCreativeToAd(result.id, uploadAdId, selectedCampaign?.id, uploadAssignMode);
           if (!assignResult.success) {
             adAssignmentError = assignResult.error || 'Could not assign creative to selected Ad';
           } else {
@@ -702,6 +734,11 @@ const CreativeGrid: React.FC = () => {
       return;
     }
 
+    if (bulkAssignMode === 'replace') {
+      const confirmed = window.confirm('Replace mode will overwrite current creative assignments in the selected Ad. Continue?');
+      if (!confirmed) return;
+    }
+
     const selectedIds = Array.from(selectedCreatives);
     setToast({
       show: true,
@@ -715,7 +752,7 @@ const CreativeGrid: React.FC = () => {
     let firstError = '';
 
     for (const creativeId of selectedIds) {
-      const result = await assignCreativeToAd(creativeId, bulkAssignAdId, selectedCampaign.id);
+      const result = await assignCreativeToAd(creativeId, bulkAssignAdId, selectedCampaign.id, bulkAssignMode);
       if (result.success) {
         successCount++;
       } else {
@@ -827,6 +864,19 @@ const CreativeGrid: React.FC = () => {
     return <ImageIcon className="w-5 h-5 text-blue-500" />;
   };
 
+  const renderCreativePlaceholder = (creative: Creative, compact = false) => {
+    const label = creative.type?.replace(/_/g, ' ') || 'CREATIVE';
+    return (
+      <div className={`w-full h-full rounded-lg border border-blue-500/30 bg-gradient-to-br from-blue-600/20 via-slate-900 to-slate-950 flex flex-col items-center justify-center gap-2 ${compact ? 'px-2 py-1' : 'px-3 py-2'}`}>
+        <div className={`text-blue-300 ${compact ? 'scale-90' : ''}`}>{getIcon(creative.type)}</div>
+        <div className="text-center leading-tight">
+          <p className={`font-bold uppercase tracking-wider text-blue-200 ${compact ? 'text-[8px]' : 'text-[10px]'}`}>{label}</p>
+          <p className={`text-blue-400 font-mono ${compact ? 'text-[8px]' : 'text-[10px]'}`}>{creative.size}</p>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-950/40">
       {/* Toolbar */}
@@ -853,6 +903,14 @@ const CreativeGrid: React.FC = () => {
           {viewMode === 'list' && selectedCreatives.size > 0 && (
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600/10 border border-blue-500/20 mr-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400">{selectedCreatives.size} selected</span>
+              <select
+                value={bulkAssignMode}
+                onChange={(e) => setBulkAssignMode(e.target.value as 'add' | 'replace')}
+                className="bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-[10px] text-slate-200"
+              >
+                <option value="add">Mode: Add</option>
+                <option value="replace">Mode: Replace</option>
+              </select>
               <select
                 value={bulkAssignAdId}
                 onChange={(e) => setBulkAssignAdId(e.target.value)}
@@ -1053,22 +1111,7 @@ const CreativeGrid: React.FC = () => {
             {filteredCreatives.map((creative) => (
               <div key={creative.id} className="group bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden hover:border-blue-500/30 transition-all hover:shadow-xl hover:shadow-blue-500/5">
                 <div className="aspect-square bg-slate-950 relative overflow-hidden flex items-center justify-center border-b border-slate-800">
-                  {creative.thumbnailUrl ? (
-                    <div className="w-full h-full relative group-hover:scale-105 transition-transform duration-700">
-                      <img 
-                        src={creative.thumbnailUrl} 
-                        alt={creative.name}
-                        className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 to-transparent" />
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-2 text-slate-700">
-                      {getIcon(creative.type)}
-                      <span className="text-[10px] font-bold uppercase tracking-widest">No Preview</span>
-                    </div>
-                  )}
+                  {renderCreativePlaceholder(creative)}
                   <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
                     {creative.externalUrl && (
                       <a 
@@ -1135,7 +1178,8 @@ const CreativeGrid: React.FC = () => {
                     </div>
                   </div>
                   <div className="absolute top-3 left-3">
-                    <span className="px-2 py-1 rounded-md bg-slate-900/80 backdrop-blur-md border border-slate-700 text-[9px] font-bold text-slate-300 uppercase tracking-wider">
+                    <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-600/20 backdrop-blur-md border border-blue-500/30 text-[9px] font-bold text-blue-200 uppercase tracking-wider">
+                      <span className="w-1.5 h-1.5 rounded-sm bg-blue-400" />
                       {creative.size}
                     </span>
                   </div>
@@ -1174,6 +1218,15 @@ const CreativeGrid: React.FC = () => {
         ) : (
           <div className="bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden">
             <table className="w-full text-left border-collapse">
+              <colgroup>
+                <col style={{ width: 48 }} />
+                <col style={{ width: listColumnWidths.preview }} />
+                <col style={{ width: listColumnWidths.name }} />
+                <col style={{ width: listColumnWidths.type }} />
+                <col style={{ width: listColumnWidths.size }} />
+                <col style={{ width: listColumnWidths.status }} />
+                <col style={{ width: 64 }} />
+              </colgroup>
               <thead>
                 <tr className="bg-slate-900 border-b border-slate-800">
                   <th className="p-4 w-12">
@@ -1184,11 +1237,11 @@ const CreativeGrid: React.FC = () => {
                       onChange={toggleSelectAllCreatives}
                     />
                   </th>
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Preview</th>
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Name</th>
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Type</th>
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Dimensions</th>
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Status</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 relative">Preview<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startListResize('preview', e.clientX, listColumnWidths.preview)} /></th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 relative">Name<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startListResize('name', e.clientX, listColumnWidths.name)} /></th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 relative">Type<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startListResize('type', e.clientX, listColumnWidths.type)} /></th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 relative">Dimensions<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startListResize('size', e.clientX, listColumnWidths.size)} /></th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 relative">Status<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startListResize('status', e.clientX, listColumnWidths.status)} /></th>
                   <th className="p-4 w-12"></th>
                 </tr>
               </thead>
@@ -1205,11 +1258,7 @@ const CreativeGrid: React.FC = () => {
                     </td>
                     <td className="p-4">
                       <div className="w-10 h-10 bg-slate-950 rounded-lg border border-slate-800 overflow-hidden flex items-center justify-center">
-                        {creative.thumbnailUrl ? (
-                          <img src={creative.thumbnailUrl} className="w-full h-full object-contain" alt="" referrerPolicy="no-referrer" />
-                        ) : (
-                          getIcon(creative.type)
-                        )}
+                        {renderCreativePlaceholder(creative, true)}
                       </div>
                     </td>
                     <td className="p-4">
@@ -1228,7 +1277,8 @@ const CreativeGrid: React.FC = () => {
                     </td>
                     <td className="p-4 text-[10px] font-bold text-slate-500 uppercase tracking-wider">{creative.type.replace(/_/g, ' ')}</td>
                     <td className="p-4">
-                      <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-[10px] font-bold text-slate-400">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-600/20 border border-blue-500/30 text-[10px] font-bold text-blue-200">
+                        <span className="w-1.5 h-1.5 rounded-sm bg-blue-400" />
                         {creative.size}
                       </span>
                     </td>
@@ -1523,6 +1573,19 @@ const CreativeGrid: React.FC = () => {
                     </option>
                   ))}
                 </select>
+                {((pendingFiles.length === 0) || (pendingFiles.length > 1 && batchAssignmentMode === 'single')) && (
+                  <div className="mt-2">
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Assignment Mode</label>
+                    <select
+                      value={uploadAssignMode}
+                      onChange={(e) => setUploadAssignMode(e.target.value as 'add' | 'replace')}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="add">Add (keep existing creatives)</option>
+                      <option value="replace">Replace (overwrite current creatives in Ad)</option>
+                    </select>
+                  </div>
+                )}
                 {!selectedCampaign && (
                   <p className="text-[10px] text-slate-500 mt-2">Select a campaign first to load Ads from CM360.</p>
                 )}

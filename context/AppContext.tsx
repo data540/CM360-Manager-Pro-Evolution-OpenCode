@@ -67,7 +67,7 @@ interface AppContextType {
   updateCreativeStatus: (creativeIds: string[], active: boolean) => Promise<{success: number, failed: number, error?: string}>;
   copyCreative: (creativeId: string, destinationAdvertiserId: string) => Promise<{success: boolean, id?: string, error?: string}>;
   assignCreativeToPlacement: (creativeId: string, placementId: string, campaignId: string) => Promise<{success: boolean, id?: string, error?: string}>;
-  assignCreativeToAd: (creativeId: string, adId: string, campaignId?: string) => Promise<{success: boolean, id?: string, error?: string}>;
+  assignCreativeToAd: (creativeId: string, adId: string, campaignId?: string, mode?: 'add' | 'replace') => Promise<{success: boolean, id?: string, error?: string}>;
   isAdsLoading: boolean;
 }
 
@@ -1143,7 +1143,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  const assignCreativeToAd = async (creativeId: string, adId: string, campaignId?: string) => {
+  const assignCreativeToAd = async (creativeId: string, adId: string, campaignId?: string, mode: 'add' | 'replace' = 'add') => {
     if (!accessToken || !profileId) return { success: false, error: 'No connection' };
     try {
       const effectiveCampaignId = campaignId || selectedCampaign?.id;
@@ -1232,9 +1232,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return nextAssignment;
       };
 
-      const nextAssignments = alreadyAssigned
-        ? normalizedAssignments
-        : [...normalizedAssignments, buildNewAssignmentFromTemplate()];
+      const replacementAssignment = buildNewAssignmentFromTemplate();
+      const nextAssignments = mode === 'replace'
+        ? [replacementAssignment]
+        : (alreadyAssigned
+          ? normalizedAssignments
+          : [...normalizedAssignments, replacementAssignment]);
 
       const patchPayload = adData?.creativeRotation
         ? {
@@ -1326,7 +1329,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       let patchSucceeded = false;
       const attemptErrors: string[] = [];
-      const assignmentContext = `adId=${adId}, creativeId=${creativeId}, campaignId=${effectiveCampaignId}`;
+      const assignmentContext = `adId=${adId}, creativeId=${creativeId}, campaignId=${effectiveCampaignId}, mode=${mode}`;
 
       for (const attempt of patchAttempts) {
         const patchRes = await fetch(attempt.url, {
@@ -1482,7 +1485,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const isNew = !draft.cmId;
         const url = isNew 
           ? `/api/cm360/userprofiles/${profileId}/placements`
-          : `/api/cm360/userprofiles/${profileId}/placements/${draft.cmId}`;
+          : `/api/cm360/userprofiles/${profileId}/placements?id=${encodeURIComponent(draft.cmId)}`;
         
         const method = isNew ? 'POST' : 'PATCH';
         
@@ -1497,6 +1500,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             endDate: draft.endDate
           }
         };
+
+        if (!isNew) {
+          body.id = draft.cmId;
+        }
 
         if (isNew) {
           body.size = {
@@ -1517,7 +1524,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           body: JSON.stringify(body)
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(async () => {
+          const text = await res.text().catch(() => '');
+          return { error: { message: text || `HTTP ${res.status}: ${res.statusText}` } };
+        });
 
         if (res.ok) {
           successCount++;
@@ -1546,7 +1556,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           });
         } else {
           failedCount++;
-          results.push({ id, success: false, error: data.error?.message || 'API Error' });
+          results.push({ id, success: false, error: data.error?.message || `API Error ${res.status}` });
         }
       } catch (e: any) {
         failedCount++;

@@ -39,6 +39,7 @@ const Sidebar: React.FC = () => {
 
   const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
   const [newCampaignName, setNewCampaignName] = useState('');
+  const [newCampaignEndDate, setNewCampaignEndDate] = useState(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
   const [isEuPolitical, setIsEuPolitical] = useState(false);
   const [selectedLandingPageId, setSelectedLandingPageId] = useState('');
   const [customLandingPageUrl, setCustomLandingPageUrl] = useState('');
@@ -52,6 +53,7 @@ const Sidebar: React.FC = () => {
       setIsCampaignModalOpen(true);
       setSelectedLandingPageId('');
       setCustomLandingPageUrl('');
+      setNewCampaignEndDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
       if (selectedAdvertiser) fetchLandingPages(selectedAdvertiser.id);
     };
     window.addEventListener('open-campaign-modal', handleOpenModal);
@@ -66,6 +68,16 @@ const Sidebar: React.FC = () => {
 
   const handleCreateCampaign = async () => {
     if (!newCampaignName || !selectedAdvertiser) return;
+    const today = new Date().toISOString().split('T')[0];
+    if (newCampaignEndDate < today) {
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'Invalid end date',
+        details: 'Campaign end date must be today or later.'
+      });
+      return;
+    }
     
     setToast({
       show: true,
@@ -77,7 +89,7 @@ const Sidebar: React.FC = () => {
     const result = await createCampaign({
       name: newCampaignName,
       startDate: new Date().toISOString().split('T')[0],
-      endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      endDate: newCampaignEndDate,
       isEuPolitical,
       landingPageId: isCustomLandingPage ? undefined : selectedLandingPageId,
       landingPageUrl: isCustomLandingPage ? customLandingPageUrl : undefined
@@ -184,6 +196,7 @@ const Sidebar: React.FC = () => {
                     setIsCampaignModalOpen(true);
                     setSelectedLandingPageId('');
                     setCustomLandingPageUrl('');
+                    setNewCampaignEndDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
                     if (selectedAdvertiser) fetchLandingPages(selectedAdvertiser.id);
                   }}
                   className="text-[9px] text-blue-400 hover:text-blue-300 flex items-center gap-1"
@@ -282,6 +295,17 @@ const Sidebar: React.FC = () => {
               </div>
 
               <div>
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Campaign End Date</label>
+                <input
+                  type="date"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+                  value={newCampaignEndDate}
+                  onChange={(e) => setNewCampaignEndDate(e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+
+              <div>
                 <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Declarations</label>
                 <p className="text-[11px] text-slate-400 mb-3">EU political ads (required)</p>
                 <div className="space-y-3">
@@ -371,7 +395,7 @@ const Sidebar: React.FC = () => {
                 </button>
                 <button 
                   onClick={handleCreateCampaign}
-                  disabled={!newCampaignName || (isCustomLandingPage ? !customLandingPageUrl : !selectedLandingPageId) || (toast.type === 'loading' && toast.show)}
+                  disabled={!newCampaignName || !newCampaignEndDate || (isCustomLandingPage ? !customLandingPageUrl : !selectedLandingPageId) || (toast.type === 'loading' && toast.show)}
                   className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20 disabled:opacity-50"
                 >
                   {toast.type === 'loading' && toast.show ? <RefreshCw className="w-4 h-4 animate-spin mx-auto" /> : 'Create Campaign'}
