@@ -1127,6 +1127,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return { success: false, error: 'Selected Ad does not belong to the active campaign.' };
       }
 
+      // CM360 requirement: the creative must be associated with the campaign first.
+      const associationRes = await fetch(`/api/cm360/userprofiles/${profileId}/campaigns/${effectiveCampaignId}/campaignCreativeAssociations`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ creativeId })
+      });
+
+      if (!associationRes.ok) {
+        const associationData = await associationRes.json().catch(() => ({}));
+        const associationError = associationData?.error?.errors?.map((e: any) => e?.message).filter(Boolean).join(' | ') || associationData?.error?.message || `HTTP ${associationRes.status}`;
+
+        // If the creative is already associated, continue with Ad assignment.
+        if (!/already|exists|duplicate/i.test(String(associationError))) {
+          return {
+            success: false,
+            error: `Campaign association failed before ad assignment: ${associationError}`
+          };
+        }
+      }
+
       const adRes = await fetch(`/api/cm360/userprofiles/${profileId}/ads/${adId}`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
@@ -1151,6 +1174,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       const buildNewAssignmentFromTemplate = () => {
         const template = normalizedAssignments[0] || {};
+        const rotationType = adData?.creativeRotation?.type || '';
         const nextAssignment: any = {
           ...template,
           creativeId,
@@ -1164,7 +1188,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         delete nextAssignment.startTime;
         delete nextAssignment.endTime;
 
-        if (!nextAssignment.weight) nextAssignment.weight = 1;
+        if (rotationType === 'CREATIVE_ROTATION_TYPE_SEQUENTIAL') {
+          const currentSequences = normalizedAssignments
+            .map((item: any) => Number(item.sequence))
+            .filter((value: number) => Number.isFinite(value) && value > 0);
+          const nextSequence = currentSequences.length > 0 ? Math.max(...currentSequences) + 1 : 1;
+          nextAssignment.sequence = nextSequence;
+          delete nextAssignment.weight;
+        } else {
+          if (!nextAssignment.weight || Number(nextAssignment.weight) <= 0) nextAssignment.weight = 1;
+          delete nextAssignment.sequence;
+        }
+
         return nextAssignment;
       };
 
@@ -1197,16 +1232,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return text || `HTTP ${res.status}: ${res.statusText}`;
       };
 
-      const patchAttempts: Array<{ method: 'PATCH' | 'PUT'; body: any; label: string }> = [];
+      const hasCreativeAssignment = (adPayload: any) => {
+        const assignments = Array.isArray(adPayload?.creativeRotation?.creativeAssignments)
+          ? adPayload.creativeRotation.creativeAssignments
+          : (Array.isArray(adPayload?.creativeAssignments) ? adPayload.creativeAssignments : []);
+        return assignments.some((item: any) => String(item?.creativeId) === String(creativeId));
+      };
+
+      const patchAttempts: Array<{ method: 'PATCH' | 'PUT'; url: string; body: any; label: string }> = [];
 
       if (adData?.creativeRotation) {
         patchAttempts.push({
           method: 'PATCH',
+          url: `/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(adId)}`,
           body: patchPayload,
           label: 'rotation.assignments'
         });
         patchAttempts.push({
           method: 'PATCH',
+          url: `/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(adId)}`,
           body: {
             id: adId,
             creativeRotation: {
@@ -1218,6 +1262,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         });
         patchAttempts.push({
           method: 'PUT',
+          url: `/api/cm360/userprofiles/${profileId}/ads`,
           body: {
             ...adData,
             id: adId,
@@ -1232,6 +1277,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       patchAttempts.push({
         method: 'PATCH',
+        url: `/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(adId)}`,
         body: {
           id: adId,
           creativeAssignments: nextAssignments,
@@ -1240,6 +1286,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
       patchAttempts.push({
         method: 'PUT',
+        url: `/api/cm360/userprofiles/${profileId}/ads`,
         body: {
           ...adData,
           id: adId,
@@ -1250,9 +1297,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       let patchSucceeded = false;
       const attemptErrors: string[] = [];
+      const assignmentContext = `adId=${adId}, creativeId=${creativeId}, campaignId=${effectiveCampaignId}`;
 
       for (const attempt of patchAttempts) {
-        const patchRes = await fetch(`/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(adId)}`, {
+        const patchRes = await fetch(attempt.url, {
           method: attempt.method,
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -1262,11 +1310,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         });
 
         if (patchRes.ok) {
-          patchSucceeded = true;
-          break;
+          const patchPayload = await patchRes.json().catch(() => ({}));
+          if (hasCreativeAssignment(patchPayload)) {
+            patchSucceeded = true;
+            console.info(`[assignCreativeToAd] CM360 update success (${attempt.label}) :: ${assignmentContext}`);
+            break;
+          }
+
+          const noOpError = `CM360 accepted ${attempt.label} but returned payload without creative assignment`;
+          console.warn(`[assignCreativeToAd] ${noOpError} :: ${assignmentContext}`);
+          attemptErrors.push(`${attempt.label}: ${noOpError}`);
+          continue;
         }
 
         const errorText = await parseErrorText(patchRes);
+        console.warn(`[assignCreativeToAd] CM360 update failed (${attempt.label}) :: ${assignmentContext} :: ${errorText}`);
         attemptErrors.push(`${attempt.label}: ${errorText}`);
       }
 
@@ -1274,6 +1332,30 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return {
           success: false,
           error: `Failed to assign creative to selected Ad. ${attemptErrors.join(' || ')}`
+        };
+      }
+
+      let confirmed = false;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const verifyRes = await fetch(`/api/cm360/userprofiles/${profileId}/ads/${adId}?cacheBust=${Date.now()}_${attempt}`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+
+        const verifyData = await verifyRes.json().catch(() => ({}));
+        if (verifyRes.ok && hasCreativeAssignment(verifyData)) {
+          confirmed = true;
+          console.info(`[assignCreativeToAd] assignment confirmed on verify attempt ${attempt + 1} :: ${assignmentContext}`);
+          break;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+
+      if (!confirmed) {
+        console.warn(`[assignCreativeToAd] assignment not visible after verification :: ${assignmentContext}`);
+        return {
+          success: false,
+          error: 'CM360 accepted update but creative is not visible in Ad assignments yet. Retry assignment in a few seconds.'
         };
       }
 

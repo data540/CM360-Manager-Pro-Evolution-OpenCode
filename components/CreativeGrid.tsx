@@ -491,10 +491,14 @@ const CreativeGrid: React.FC = () => {
       
       if (result.success) {
         let adAssignmentError = '';
+        let adAssignmentSuccess = '';
         if (uploadAdId && result.id) {
           const assignResult = await assignCreativeToAd(result.id, uploadAdId, selectedCampaign?.id);
           if (!assignResult.success) {
             adAssignmentError = assignResult.error || 'Could not assign creative to selected Ad';
+          } else {
+            const targetAd = campaignAds.find((ad) => ad.id === uploadAdId);
+            adAssignmentSuccess = targetAd ? `Assigned to Ad: ${targetAd.name}.` : 'Assigned to selected Ad.';
           }
         }
 
@@ -506,7 +510,7 @@ const CreativeGrid: React.FC = () => {
           show: true,
           type: adAssignmentError ? 'error' : 'success',
           message: adAssignmentError ? 'Upload succeeded, assignment failed' : 'Upload Successful!',
-          details: adAssignmentError || 'The creative has been registered and is now available in Campaign Manager.',
+          details: adAssignmentError || `${adAssignmentSuccess} The creative has been registered and is now available in Campaign Manager.`,
           link: verifyLink
         });
       } else {
