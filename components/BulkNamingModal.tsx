@@ -15,17 +15,19 @@ export interface BulkNamingConfig {
   separator: string;
 }
 
+export const collapseConsecutiveUnderscores = (value: string): string => value.replace(/_{2,}/g, '_');
+
 export const applyBulkNamingConfig = (name: string, config: BulkNamingConfig): string => {
   if (!config.value) return name;
 
   switch (config.mode) {
     case 'prefix':
-      return `${config.value}${config.separator}${name}`;
+      return collapseConsecutiveUnderscores(`${config.value}${config.separator}${name}`);
     case 'suffix':
-      return `${name}${config.separator}${config.value}`;
+      return collapseConsecutiveUnderscores(`${name}${config.separator}${config.value}`);
     case 'replace':
       if (!config.replaceFrom) return name;
-      return name.replace(new RegExp(config.replaceFrom, 'g'), config.value);
+      return collapseConsecutiveUnderscores(name.replace(new RegExp(config.replaceFrom, 'g'), config.value));
     default:
       return name;
   }

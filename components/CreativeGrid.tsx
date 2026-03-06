@@ -186,6 +186,14 @@ const CreativeGrid: React.FC = () => {
     return `${parseInt(match[1], 10)}x${parseInt(match[2], 10)}`;
   };
 
+  const collapseUnderscores = (value: string): string => value.replace(/_{2,}/g, '_');
+
+  const toNameToken = (value?: string | null): string => (value || '').trim().replace(/\s+/g, '_');
+
+  const joinNameTokens = (tokens: Array<string | null | undefined>): string => {
+    return collapseUnderscores(tokens.map(toNameToken).filter(Boolean).join('_'));
+  };
+
   const getImageSize = (file: File): Promise<string | null> => {
     return new Promise((resolve) => {
       if (!file.type.startsWith('image/')) {
@@ -286,8 +294,8 @@ const CreativeGrid: React.FC = () => {
 
     setIsUploadModalOpen(false);
     setManualPlanIndex(null);
-    const campaignPrefix = selectedCampaign ? `${selectedCampaign.name.substring(0, 10)}_` : '';
-    const dateStr = includeDate ? `_${new Date().toLocaleDateString('es-ES').replace(/\//g, '-')}` : '';
+    const campaignToken = selectedCampaign ? selectedCampaign.name.substring(0, 10) : '';
+    const dateToken = includeDate ? new Date().toLocaleDateString('es-ES').replace(/\//g, '-') : '';
     const techToken = (selectedTech || 'DV360').trim().toUpperCase();
 
     setBatchProgress({ current: 0, total: plans.length, status: 'Starting batch upload...' });
@@ -301,10 +309,16 @@ const CreativeGrid: React.FC = () => {
       const plan = plans[i];
       const baseName = plan.file.name.split('.')[0];
       const nameWithConvention = namingMode === 'prefix'
-        ? `${namingText}_${baseName}${dateStr}`
-        : `${baseName}_${namingText}${dateStr}`;
+        ? joinNameTokens([namingText, baseName, dateToken])
+        : joinNameTokens([baseName, namingText, dateToken]);
 
-      const finalName = `${campaignPrefix}${nameWithConvention}_${techToken}_${selectedFormat}_${plan.finalSize.replace(/\s+/g, '_')}`;
+      const finalName = joinNameTokens([
+        campaignToken,
+        nameWithConvention,
+        techToken,
+        selectedFormat,
+        plan.finalSize.replace(/\s+/g, '_')
+      ]);
 
       setBatchProgress({
         current: i + 1,
@@ -521,9 +535,15 @@ const CreativeGrid: React.FC = () => {
     } else if (pendingFile) {
       // Single Upload Logic
       setIsUploadModalOpen(false);
-      const campaignPrefix = selectedCampaign ? `${selectedCampaign.name.substring(0, 10)}_` : '';
+      const campaignToken = selectedCampaign ? selectedCampaign.name.substring(0, 10) : '';
       const techToken = (selectedTech || 'DV360').trim().toUpperCase();
-      const finalName = `${campaignPrefix}${customName}_${techToken}_${selectedFormat}_${selectedSize.replace(/\s+/g, '_')}`;
+      const finalName = joinNameTokens([
+        campaignToken,
+        customName,
+        techToken,
+        selectedFormat,
+        selectedSize.replace(/\s+/g, '_')
+      ]);
 
       setToast({
         show: true,
@@ -1432,8 +1452,8 @@ const CreativeGrid: React.FC = () => {
 
       {/* Upload Confirmation Modal */}
       {isUploadModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center p-4 overflow-y-auto bg-slate-950/80 backdrop-blur-sm">
+          <div className="my-4 max-h-[calc(100vh-2rem)] overflow-y-auto custom-scrollbar bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <h3 className="text-xl font-bold text-white mb-2">
               {pendingFiles.length > 0 ? `Batch Upload (${pendingFiles.length} files)` : 'Configure Creative'}
             </h3>
@@ -1676,7 +1696,13 @@ const CreativeGrid: React.FC = () => {
                 <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 mt-4">
                   <label className="block text-[9px] uppercase font-bold text-slate-600 mb-1">Final Name Preview</label>
                     <p className="text-xs font-mono text-blue-400 truncate">
-                     {selectedCampaign ? `${selectedCampaign.name.substring(0, 10)}_` : ''}{customName}_{(selectedTech || 'DV360').trim().toUpperCase()}_{selectedFormat}_{selectedSize.replace(/\s+/g, '_')}
+                     {joinNameTokens([
+                       selectedCampaign ? selectedCampaign.name.substring(0, 10) : '',
+                       customName,
+                       (selectedTech || 'DV360').trim().toUpperCase(),
+                       selectedFormat,
+                       selectedSize.replace(/\s+/g, '_')
+                     ])}
                     </p>
                   </div>
                 )}

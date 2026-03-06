@@ -69,6 +69,7 @@ const PlacementGrid: React.FC = () => {
 
   const handlePushToCM360 = async () => {
     if (selectedRows.size === 0) return;
+    const selectedIds = Array.from(selectedRows);
     
     setToast({
       show: true,
@@ -77,7 +78,8 @@ const PlacementGrid: React.FC = () => {
       details: 'Syncing changes with Campaign Manager 360.'
     });
 
-    const result = await publishSelectedDrafts(Array.from(selectedRows));
+    const result = await publishSelectedDrafts(selectedIds);
+    const failedIds = new Set(result.results.filter((r) => !r.success).map((r) => r.id));
     
     if (result.success > 0) {
       setToast({
@@ -86,6 +88,7 @@ const PlacementGrid: React.FC = () => {
         message: 'Publish Successful!',
         details: `${result.success} placements synced correctly. ${result.failed > 0 ? `${result.failed} failed.` : ''}`,
       });
+      setSelectedRows(failedIds);
     } else {
       setToast({
         show: true,
@@ -93,9 +96,8 @@ const PlacementGrid: React.FC = () => {
         message: 'Publish Failed',
         details: result.results.find(r => !r.success)?.error || 'None of the selected placements could be registered.'
       });
+      setSelectedRows(failedIds.size > 0 ? failedIds : new Set(selectedIds));
     }
-    
-    setSelectedRows(new Set());
   };
 
   const filteredPlacements = placements.map(p => placementsDrafts[p.id] || p).filter(p => {
@@ -606,8 +608,13 @@ const PlacementGrid: React.FC = () => {
               const newName = applyBulkNamingConfig(p.name, config);
               updatePlacementName(id, newName);
             });
+            setToast({
+              show: true,
+              type: 'success',
+              message: 'Draft naming changes prepared',
+              details: 'Use Push to CM360 to publish these placement drafts.'
+            });
             setIsBulkNamingOpen(false);
-            setSelectedRows(new Set());
           }}
         />
       )}

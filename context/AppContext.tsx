@@ -1636,7 +1636,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updatePlacementName = (placementId: string, newName: string) => {
-    updatePlacementDraft(placementId, { name: newName });
+    updatePlacementDraft(placementId, { name: newName.replace(/_{2,}/g, '_') });
   };
 
   const updateAdDraft = (adId: string, changes: Partial<Ad>) => {
@@ -1670,7 +1670,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateCreativeName = (creativeId: string, newName: string) => {
-    updateCreativeDraft(creativeId, { name: newName });
+    updateCreativeDraft(creativeId, { name: newName.replace(/_{2,}/g, '_') });
   };
 
   const publishSelectedAdDrafts = async (adIds: string[]) => {
