@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Placement, Status } from '../types';
 import BulkNamingModal, { applyBulkNamingConfig } from './BulkNamingModal';
@@ -37,9 +37,12 @@ const PlacementGrid: React.FC = () => {
     updatePlacementDraft,
     accountId, 
     selectedAdvertiser, 
-    assignCreativeToPlacement 
+    assignCreativeToPlacement,
+    sites,
+    fetchSites,
   } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
+  const [siteFilter, setSiteFilter] = useState('all');
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [isCreatorOpen, setIsCreatorOpen] = useState(false);
   const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
@@ -52,13 +55,27 @@ const PlacementGrid: React.FC = () => {
   const [editEndDate, setEditEndDate] = useState('');
   const [isBulkNamingOpen, setIsBulkNamingOpen] = useState(false);
   const [isBulkActionsOpen, setIsBulkActionsOpen] = useState(false);
-  const [columnWidths, setColumnWidths] = useState({
+  const defaultColumnWidths = {
     name: 360,
-    site: 150,
+    site: 170,
     dimensions: 130,
     type: 110,
     status: 130,
     dates: 230,
+  };
+  const [columnWidths, setColumnWidths] = useState(() => {
+    if (typeof window === 'undefined') return defaultColumnWidths;
+    try {
+      const raw = window.localStorage.getItem('placementGridColumnWidths');
+      if (!raw) return defaultColumnWidths;
+      const parsed = JSON.parse(raw);
+      return {
+        ...defaultColumnWidths,
+        ...parsed,
+      };
+    } catch {
+      return defaultColumnWidths;
+    }
   });
   
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'loading', message: string, details?: string, link?: string}>({
@@ -66,6 +83,21 @@ const PlacementGrid: React.FC = () => {
     type: 'loading',
     message: ''
   });
+
+  useEffect(() => {
+    if (selectedAdvertiser) {
+      fetchSites();
+    }
+  }, [selectedAdvertiser, fetchSites]);
+
+  useEffect(() => {
+    setSiteFilter('all');
+  }, [selectedCampaign?.id]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('placementGridColumnWidths', JSON.stringify(columnWidths));
+  }, [columnWidths]);
 
   const handlePushToCM360 = async () => {
     if (selectedRows.size === 0) return;
@@ -100,10 +132,23 @@ const PlacementGrid: React.FC = () => {
     }
   };
 
-  const filteredPlacements = placements.map(p => placementsDrafts[p.id] || p).filter(p => {
+  const placementRows = placements.map((p) => placementsDrafts[p.id] || p);
+
+  const filteredPlacements = placementRows.filter(p => {
     const matchesCampaign = !selectedCampaign || p.campaignId === selectedCampaign.id;
     const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesCampaign && matchesSearch;
+    const matchesSite = siteFilter === 'all' || p.siteId === siteFilter;
+    return matchesCampaign && matchesSearch && matchesSite;
+  });
+
+  const siteOptions = Array.from(new Set(placementRows
+    .filter((p) => !selectedCampaign || p.campaignId === selectedCampaign.id)
+    .map((p) => p.siteId))).map((siteId) => {
+    const match = sites.find((site) => site.id === siteId);
+    return {
+      id: siteId,
+      name: match?.name || `Site ${siteId}`,
+    };
   });
 
   const toggleSelectAll = () => {
@@ -153,9 +198,9 @@ const PlacementGrid: React.FC = () => {
   };
 
   const handleExportCSV = () => {
-    const headers = ['Name', 'Site', 'Size', 'Type', 'Status', 'Start', 'End'];
+    const headers = ['Name', 'Placement ID', 'Size', 'Type', 'Status', 'Start', 'End'];
     const rows = filteredPlacements.map(p => [
-      p.name, p.siteId, p.size, p.type, p.status, p.startDate, p.endDate
+      p.name, p.cmId || p.id, p.size, p.type, p.status, p.startDate, p.endDate
     ].join(','));
     const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows].join('\n');
     const encodedUri = encodeURI(csvContent);
@@ -235,17 +280,22 @@ const PlacementGrid: React.FC = () => {
   };
 
   const startResize = (column: keyof typeof columnWidths, startX: number, startWidth: number) => {
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
     const onMouseMove = (event: MouseEvent) => {
       const delta = event.clientX - startX;
       setColumnWidths((prev) => ({
         ...prev,
-        [column]: Math.max(100, Math.min(700, startWidth + delta)),
+        [column]: Math.max(120, Math.min(900, startWidth + delta)),
       }));
     };
 
     const onMouseUp = () => {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
     };
 
     window.addEventListener('mousemove', onMouseMove);
@@ -264,6 +314,21 @@ const PlacementGrid: React.FC = () => {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
+        </div>
+
+        <div className="min-w-[260px]">
+          <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Filter by Site</label>
+          <select
+            value={siteFilter}
+            onChange={(e) => setSiteFilter(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2.5 px-3 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+          >
+            <option value="all">All sites</option>
+            {siteOptions.length === 0 && <option value="all" disabled>No sites available</option>}
+            {siteOptions.map((site) => (
+              <option key={site.id} value={site.id}>{site.name}</option>
+            ))}
+          </select>
         </div>
         
         <div className="flex items-center gap-2">
@@ -367,13 +432,13 @@ const PlacementGrid: React.FC = () => {
                 <div className="flex items-center gap-2 cursor-pointer hover:text-slate-300 transition-colors">
                   Placement Name <ArrowUpDown className="w-3 h-3" />
                 </div>
-                <div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startResize('name', e.clientX, columnWidths.name)} />
-              </th>
-              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Site<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startResize('site', e.clientX, columnWidths.site)} /></th>
-              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Dimensions<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startResize('dimensions', e.clientX, columnWidths.dimensions)} /></th>
-              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Type<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startResize('type', e.clientX, columnWidths.type)} /></th>
-              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Status<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startResize('status', e.clientX, columnWidths.status)} /></th>
-              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Flight Dates<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startResize('dates', e.clientX, columnWidths.dates)} /></th>
+                 <div className="absolute -right-1 top-0 h-full w-3 cursor-col-resize hover:bg-blue-500/20" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('name', e.clientX, columnWidths.name); }} />
+               </th>
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Placement ID<div className="absolute -right-1 top-0 h-full w-3 cursor-col-resize hover:bg-blue-500/20" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('site', e.clientX, columnWidths.site); }} /></th>
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Dimensions<div className="absolute -right-1 top-0 h-full w-3 cursor-col-resize hover:bg-blue-500/20" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('dimensions', e.clientX, columnWidths.dimensions); }} /></th>
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Type<div className="absolute -right-1 top-0 h-full w-3 cursor-col-resize hover:bg-blue-500/20" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('type', e.clientX, columnWidths.type); }} /></th>
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Status<div className="absolute -right-1 top-0 h-full w-3 cursor-col-resize hover:bg-blue-500/20" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('status', e.clientX, columnWidths.status); }} /></th>
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Flight Dates<div className="absolute -right-1 top-0 h-full w-3 cursor-col-resize hover:bg-blue-500/20" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('dates', e.clientX, columnWidths.dates); }} /></th>
               <th className="p-4 w-12"></th>
             </tr>
           </thead>
@@ -423,13 +488,13 @@ const PlacementGrid: React.FC = () => {
                       setEditingField('name');
                       setEditValue(p.name);
                     }}>
-                      <span className="truncate max-w-[300px]">{p.name}</span>
+                      <span className="truncate" style={{ maxWidth: `${Math.max(180, columnWidths.name - 72)}px` }}>{p.name}</span>
                       <Edit3 className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
                   )}
                 </td>
-                <td className="p-4 text-base font-semibold text-slate-200 tracking-tight">
-                  {p.siteId}
+                <td className="p-4 text-base font-semibold text-slate-200 tracking-tight font-mono">
+                  {p.cmId || p.id}
                 </td>
                 <td className="p-4">
                   <span className="inline-flex px-2.5 py-1 rounded bg-slate-700/40 text-sm font-bold text-slate-200 border border-slate-500/40 group-hover:border-blue-500/20 transition-all">

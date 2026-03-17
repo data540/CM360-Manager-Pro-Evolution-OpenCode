@@ -55,9 +55,12 @@ export interface Creative {
   size: string;
   status: Status;
   active: boolean;
+  endDate?: string;
   thumbnailUrl: string;
   placementIds: string[];
   externalUrl?: string;
+  landingPageId?: string;
+  landingPageUrl?: string;
   isDraft?: boolean;
   originalData?: Partial<Creative>;
 }

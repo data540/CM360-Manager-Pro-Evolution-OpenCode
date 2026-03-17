@@ -47,6 +47,8 @@ const CampaignGrid: React.FC = () => {
   const [editStartDate, setEditStartDate] = useState('');
   const [editEndDate, setEditEndDate] = useState('');
   const [isBulkNamingOpen, setIsBulkNamingOpen] = useState(false);
+  const [isBulkEndDateOpen, setIsBulkEndDateOpen] = useState(false);
+  const [bulkEndDate, setBulkEndDate] = useState('');
   const [isBulkActionsOpen, setIsBulkActionsOpen] = useState(false);
 
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'loading', message: string, details?: string, link?: string}>({
@@ -107,7 +109,7 @@ const CampaignGrid: React.FC = () => {
         show: true,
         type: 'error',
         message: 'Push Partially Failed',
-        details: `Pushed ${result.success} successfully, but ${result.failed} failed.`
+        details: `${result.error || 'CM360 rejected one or more campaigns.'} (Success: ${result.success}, Failed: ${result.failed})`
       });
     }
   };
@@ -115,6 +117,32 @@ const CampaignGrid: React.FC = () => {
   const filteredCampaigns = campaigns.filter(c => 
     c.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const applyBulkEndDate = () => {
+    if (selectedRows.size === 0) return;
+    if (!bulkEndDate) {
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'End date required',
+        details: 'Select an end date before applying bulk changes.'
+      });
+      return;
+    }
+
+    selectedRows.forEach((id) => {
+      updateCampaignDraft(id, { endDate: bulkEndDate });
+    });
+
+    setIsBulkEndDateOpen(false);
+    setIsBulkActionsOpen(false);
+    setToast({
+      show: true,
+      type: 'success',
+      message: 'Draft end date applied',
+      details: `${selectedRows.size} campaign(s) updated. Push to CM360 to publish.`
+    });
+  };
 
   return (
     <div className="view-root flex-1 flex flex-col h-full bg-slate-950/40">
@@ -153,6 +181,16 @@ const CampaignGrid: React.FC = () => {
                       className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2"
                     >
                       <Zap className="w-3.5 h-3.5" /> Bulk naming
+                    </button>
+                    <button
+                      onClick={() => {
+                        setBulkEndDate('');
+                        setIsBulkEndDateOpen(true);
+                        setIsBulkActionsOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2"
+                    >
+                      <Calendar className="w-3.5 h-3.5" /> Set end date
                     </button>
                   </div>
                 )}
@@ -454,6 +492,38 @@ const CampaignGrid: React.FC = () => {
             setSelectedRows(new Set());
           }}
         />
+      )}
+
+      {isBulkEndDateOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6">
+            <h3 className="text-lg font-bold text-slate-100">Bulk end date</h3>
+            <p className="text-xs text-slate-400 mt-1">This creates draft changes for selected campaigns.</p>
+            <div className="mt-4">
+              <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">New end date</label>
+              <input
+                type="date"
+                value={bulkEndDate}
+                onChange={(e) => setBulkEndDate(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setIsBulkEndDateOpen(false)}
+                className="px-4 py-2 text-sm rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={applyBulkEndDate}
+                className="px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold"
+              >
+                Save as Draft
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

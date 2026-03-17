@@ -26,7 +26,8 @@ import {
   SearchCode,
   UploadCloud,
   Loader2,
-  Zap
+  Zap,
+  Calendar
 } from 'lucide-react';
 import Toast from './Toast';
 import BulkNamingModal, { applyBulkNamingConfig } from './BulkNamingModal';
@@ -58,7 +59,10 @@ const CreativeGrid: React.FC = () => {
     assignCreativeToPlacement,
     assignCreativeToAd,
     creativesDrafts,
+    landingPages,
+    fetchLandingPages,
     updateCreativeName,
+    updateCreativeDraft,
     publishSelectedCreativeDrafts
   } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
@@ -74,6 +78,12 @@ const CreativeGrid: React.FC = () => {
   const [isSelectAll, setIsSelectAll] = useState(false);
   const [isBulkActionsOpen, setIsBulkActionsOpen] = useState(false);
   const [isBulkNamingOpen, setIsBulkNamingOpen] = useState(false);
+  const [isBulkLandingOpen, setIsBulkLandingOpen] = useState(false);
+  const [isBulkEndDateOpen, setIsBulkEndDateOpen] = useState(false);
+  const [bulkLandingMode, setBulkLandingMode] = useState<'list' | 'manual'>('list');
+  const [bulkLandingPageId, setBulkLandingPageId] = useState('');
+  const [bulkLandingUrl, setBulkLandingUrl] = useState('');
+  const [bulkEndDate, setBulkEndDate] = useState('');
   
   // Naming Convention States
   const [namingMode, setNamingMode] = useState<'prefix' | 'suffix'>('suffix');
@@ -842,6 +852,12 @@ const CreativeGrid: React.FC = () => {
     }
   }, [isGlobalSearchActive, selectedAdvertiser, fetchAllCreatives]);
 
+  useEffect(() => {
+    if (selectedAdvertiser) {
+      fetchLandingPages(selectedAdvertiser.id);
+    }
+  }, [selectedAdvertiser, fetchLandingPages]);
+
   const displayCreatives = creatives.map((c) => ({
     ...c,
     ...(creativesDrafts[c.id] || {}),
@@ -857,6 +873,117 @@ const CreativeGrid: React.FC = () => {
     return matchesSearch && matchesCampaign;
   });
   const selectedDraftCount = Array.from(selectedCreatives).filter((id) => !!creativesDrafts[id]).length;
+
+  const applyBulkLandingDraft = () => {
+    if (selectedCreatives.size === 0) return;
+
+    if (!selectedAdvertiser) {
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'Advertiser required',
+        details: 'Select an advertiser before editing landing pages in bulk.'
+      });
+      return;
+    }
+
+    const selectedIds = Array.from(selectedCreatives);
+
+    if (bulkLandingMode === 'list') {
+      if (!bulkLandingPageId) {
+        setToast({
+          show: true,
+          type: 'error',
+          message: 'Landing page required',
+          details: 'Select a landing page from the list.'
+        });
+        return;
+      }
+
+      const selectedLp = landingPages.find((lp) => lp.id === bulkLandingPageId);
+      if (!selectedLp) {
+        setToast({
+          show: true,
+          type: 'error',
+          message: 'Landing page not found',
+          details: 'Refresh landing pages and try again.'
+        });
+        return;
+      }
+
+      selectedIds.forEach((id) => {
+        updateCreativeDraft(id, {
+          landingPageId: selectedLp.id,
+          landingPageUrl: selectedLp.url,
+        });
+      });
+    } else {
+      const trimmedUrl = bulkLandingUrl.trim();
+      if (!trimmedUrl) {
+        setToast({
+          show: true,
+          type: 'error',
+          message: 'Landing URL required',
+          details: 'Enter a valid landing URL.'
+        });
+        return;
+      }
+
+      try {
+        const normalized = new URL(trimmedUrl).toString();
+        selectedIds.forEach((id) => {
+          updateCreativeDraft(id, {
+            landingPageId: undefined,
+            landingPageUrl: normalized,
+          });
+        });
+      } catch {
+        setToast({
+          show: true,
+          type: 'error',
+          message: 'Invalid URL',
+          details: 'Use a full URL, e.g. https://example.com/page'
+        });
+        return;
+      }
+    }
+
+    setIsBulkLandingOpen(false);
+    setIsBulkActionsOpen(false);
+    setToast({
+      show: true,
+      type: 'success',
+      message: 'Draft landing page changes prepared',
+      details: `Landing page draft updated for ${selectedIds.length} selected creative(s). Push to CM360 to apply.`
+    });
+  };
+
+  const applyBulkEndDateDraft = () => {
+    if (selectedCreatives.size === 0) return;
+    if (!bulkEndDate) {
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'End date required',
+        details: 'Select an end date before applying draft changes.'
+      });
+      return;
+    }
+
+    const selectedIds = Array.from(selectedCreatives);
+    selectedIds.forEach((id) => {
+      updateCreativeDraft(id, { endDate: bulkEndDate });
+    });
+
+    setIsBulkEndDateOpen(false);
+    setIsBulkActionsOpen(false);
+    setToast({
+      show: true,
+      type: 'success',
+      message: 'Draft end date changes prepared',
+      details: `${selectedIds.length} selected creative(s) updated. Push to CM360 to apply to associated ads.`
+    });
+  };
 
   const getIcon = (type: string) => {
     if (type.includes('HTML5') || type.includes('RICH_MEDIA')) return <FileCode className="w-5 h-5 text-amber-500" />;
@@ -973,6 +1100,25 @@ const CreativeGrid: React.FC = () => {
                     >
                       <Zap className="w-3.5 h-3.5" /> Bulk naming
                     </button>
+                    <button
+                      onClick={() => {
+                        setIsBulkLandingOpen(true);
+                        setIsBulkActionsOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" /> Set landing page
+                    </button>
+                    <button
+                      onClick={() => {
+                        setBulkEndDate('');
+                        setIsBulkEndDateOpen(true);
+                        setIsBulkActionsOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2"
+                    >
+                      <Calendar className="w-3.5 h-3.5" /> Set end date
+                    </button>
                   </div>
                 )}
               </div>
@@ -984,18 +1130,22 @@ const CreativeGrid: React.FC = () => {
               onClick={async () => {
                 const idsToPublish = Array.from(selectedCreatives).filter((id) => !!creativesDrafts[id]);
                 if (idsToPublish.length === 0) {
-                  setToast({ show: true, type: 'error', message: 'No draft naming changes selected', details: 'Apply Bulk naming first, then push to CM360.' });
+                  setToast({ show: true, type: 'error', message: 'No draft changes selected', details: 'Apply bulk edits first, then push to CM360.' });
                   return;
                 }
 
                 setToast({ show: true, type: 'loading', message: `Publishing ${idsToPublish.length} creative drafts...` });
                 const result = await publishSelectedCreativeDrafts(idsToPublish);
+                const firstFailure = result.results.find((item) => !item.success);
                 setToast({
                   show: true,
                   type: result.failed === 0 ? 'success' : 'error',
-                  message: result.failed === 0 ? `Published ${result.success} naming changes` : `Published ${result.success}, failed ${result.failed}`,
+                  message: result.failed === 0 ? `Published ${result.success} draft changes` : `Published ${result.success}, failed ${result.failed}`,
+                  details: result.failed > 0 ? (firstFailure?.error || 'CM360 rejected one or more creative updates.') : undefined,
                 });
-                setSelectedCreatives(new Set());
+                if (result.failed === 0) {
+                  setSelectedCreatives(new Set());
+                }
               }}
               disabled={selectedDraftCount === 0}
               className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 rounded-lg text-sm font-semibold transition-all border border-emerald-500/30 disabled:opacity-50 disabled:grayscale"
@@ -1448,6 +1598,118 @@ const CreativeGrid: React.FC = () => {
             setIsBulkActionsOpen(false);
           }}
         />
+      )}
+
+      {isBulkLandingOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6">
+            <div className="flex items-start justify-between gap-4 mb-5">
+              <div>
+                <h3 className="text-lg font-bold text-slate-100">Bulk landing page</h3>
+                <p className="text-xs text-slate-400 mt-1">Apply landing page as draft to selected creatives. Changes publish on Push to CM360.</p>
+              </div>
+              <button
+                onClick={() => setIsBulkLandingOpen(false)}
+                className="p-1.5 rounded-md text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+              >
+                <XIcon className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setBulkLandingMode('list')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${bulkLandingMode === 'list' ? 'bg-blue-600/20 text-blue-300 border-blue-500/40' : 'bg-slate-950 text-slate-400 border-slate-700 hover:text-slate-200'}`}
+                >
+                  Select from list
+                </button>
+                <button
+                  onClick={() => setBulkLandingMode('manual')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${bulkLandingMode === 'manual' ? 'bg-blue-600/20 text-blue-300 border-blue-500/40' : 'bg-slate-950 text-slate-400 border-slate-700 hover:text-slate-200'}`}
+                >
+                  Enter URL
+                </button>
+              </div>
+
+              {bulkLandingMode === 'list' ? (
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Landing page</label>
+                  <select
+                    value={bulkLandingPageId}
+                    onChange={(e) => setBulkLandingPageId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">{landingPages.length > 0 ? 'Select a landing page...' : 'No landing pages found'}</option>
+                    {landingPages.map((lp) => (
+                      <option key={lp.id} value={lp.id}>{lp.name} - {lp.url}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Landing URL</label>
+                  <input
+                    type="text"
+                    value={bulkLandingUrl}
+                    onChange={(e) => setBulkLandingUrl(e.target.value)}
+                    placeholder="https://example.com/page"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setIsBulkLandingOpen(false)}
+                className="px-4 py-2 text-sm rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={applyBulkLandingDraft}
+                className="px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold"
+              >
+                Save as Draft
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isBulkEndDateOpen && (
+        <div className="fixed inset-0 z-[111] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6">
+            <h3 className="text-lg font-bold text-slate-100">Bulk end date</h3>
+            <p className="text-xs text-slate-400 mt-1">This draft updates end date for ads associated with the selected creatives.</p>
+
+            <div className="mt-4">
+              <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">New end date</label>
+              <input
+                type="date"
+                value={bulkEndDate}
+                onChange={(e) => setBulkEndDate(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setIsBulkEndDateOpen(false)}
+                className="px-4 py-2 text-sm rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={applyBulkEndDateDraft}
+                className="px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold"
+              >
+                Save as Draft
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Upload Confirmation Modal */}

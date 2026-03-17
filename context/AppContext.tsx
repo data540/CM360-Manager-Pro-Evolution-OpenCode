@@ -395,6 +395,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const mappedCreatives: Creative[] = data.creatives.map((c: any) => {
           const sizeStr = c.size ? `${c.size.width}x${c.size.height}` : '300x250';
           const [width, height] = sizeStr.includes('x') ? sizeStr.split('x').map(Number) : [300, 250];
+          const firstClickTag = Array.isArray(c.clickTags) && c.clickTags.length > 0 ? c.clickTags[0] : null;
+          const landingPageId = c.defaultLandingPageId || c.landingPageId || firstClickTag?.advertiserLandingPageId || undefined;
+          const landingPageUrl = firstClickTag?.clickThroughUrl?.computedClickThroughUrl || firstClickTag?.clickThroughUrl?.customClickThroughUrl || firstClickTag?.clickThroughUrl?.defaultLandingPage || undefined;
           
           const simulatedThumb = `https://picsum.photos/seed/${c.id}/${width || 300}/${height || 250}`;
 
@@ -415,7 +418,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             active: c.active, // Add active status
             thumbnailUrl: simulatedThumb,
             placementIds: [],
-            externalUrl: `${baseUrl}${creativePath}`
+            externalUrl: `${baseUrl}${creativePath}`,
+            landingPageId,
+            landingPageUrl,
           };
         });
         setCreatives(mappedCreatives);
@@ -658,33 +663,85 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     for (const campaignId of campaignIds) {
       const draft = campaignsDrafts[campaignId];
-      if (!draft) continue;
+      const baseCampaign = campaigns.find((c) => c.id === campaignId);
+      if (!draft || !baseCampaign) continue;
 
       try {
-        const updateMask = ['name', 'startDate', 'endDate', 'archived'].join(',');
-        const res = await fetch(`/api/cm360/userprofiles/${profileId}/campaigns/${campaignId}?updateMask=${updateMask}`, {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            id: campaignId,
-            name: draft.name,
-            startDate: draft.startDate,
-            endDate: draft.endDate,
-            archived: draft.status === 'Paused' || draft.status === 'Completed'
-          })
-        });
+        const body: Record<string, any> = { id: campaignId };
+        const updateMask: string[] = [];
 
-        const data = await res.json().catch(() => ({}));
-        if (res.ok) {
+        if (typeof draft.name === 'string' && draft.name !== baseCampaign.name) {
+          body.name = draft.name;
+          updateMask.push('name');
+        }
+
+        if (typeof draft.startDate === 'string' && draft.startDate !== baseCampaign.startDate) {
+          body.startDate = draft.startDate;
+          updateMask.push('startDate');
+        }
+
+        if (typeof draft.endDate === 'string' && draft.endDate !== baseCampaign.endDate) {
+          body.endDate = draft.endDate;
+          updateMask.push('endDate');
+        }
+
+        const archived = draft.status === 'Paused' || draft.status === 'Completed';
+        const baseArchived = baseCampaign.status === 'Paused' || baseCampaign.status === 'Completed';
+        if (draft.status && archived !== baseArchived) {
+          body.archived = archived;
+          updateMask.push('archived');
+        }
+
+        if (updateMask.length === 0) {
+          successCount++;
+          setCampaignsDrafts(prev => {
+            const next = { ...prev };
+            delete next[campaignId];
+            return next;
+          });
+          continue;
+        }
+
+        const attempts: Array<{ url: string; method: 'PATCH' | 'PUT' }> = [
+          {
+            url: `/api/cm360/userprofiles/${profileId}/campaigns/${campaignId}?updateMask=${encodeURIComponent(updateMask.join(','))}`,
+            method: 'PATCH'
+          },
+          {
+            url: `/api/cm360/userprofiles/${profileId}/campaigns?id=${encodeURIComponent(campaignId)}`,
+            method: 'PATCH'
+          }
+        ];
+
+        let patched = false;
+        let patchError = '';
+
+        for (const attempt of attempts) {
+          const res = await fetch(attempt.url, {
+            method: attempt.method,
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+          });
+
+          if (res.ok) {
+            patched = true;
+            break;
+          }
+
+          const data = await res.json().catch(() => ({}));
+          patchError = data?.error?.message || `Error ${res.status}: ${res.statusText}`;
+        }
+
+        if (patched) {
           successCount++;
           setCampaigns(prev => prev.map(c => c.id === campaignId ? {
             ...c,
-            ...(draft.name ? { name: draft.name } : {}),
-            ...(draft.startDate ? { startDate: draft.startDate } : {}),
-            ...(draft.endDate ? { endDate: draft.endDate } : {}),
+            ...(typeof body.name === 'string' ? { name: body.name } : {}),
+            ...(typeof body.startDate === 'string' ? { startDate: body.startDate } : {}),
+            ...(typeof body.endDate === 'string' ? { endDate: body.endDate } : {}),
             ...(draft.status ? { status: draft.status } : {}),
           } : c));
 
@@ -695,12 +752,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           });
         } else {
           failedCount++;
-          lastError = data.error?.message || `Error ${res.status}`;
+          lastError = patchError || 'Campaign patch failed';
         }
       } catch (e: any) {
         failedCount++;
         lastError = e.message || 'Network error';
       }
+    }
+
+    if (successCount > 0 && selectedAdvertiser) {
+      await fetchCampaigns(selectedAdvertiser.id);
     }
 
     return { success: successCount, failed: failedCount, error: lastError };
@@ -1727,47 +1788,192 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     for (const id of creativeIds) {
       const draft = creativesDrafts[id];
-      if (!draft || !draft.name) continue;
+      const creative = creatives.find((c) => c.id === id);
+      if (!draft || !creative) continue;
 
       try {
-        const attempts: Array<{ url: string; body: any }> = [
-          {
-            url: `/api/cm360/userprofiles/${profileId}/creatives/${id}?updateMask=name`,
-            body: { id, name: draft.name }
-          },
-          {
-            url: `/api/cm360/userprofiles/${profileId}/creatives?id=${encodeURIComponent(id)}`,
-            body: { id, name: draft.name }
-          }
-        ];
+        const nextName = typeof draft.name === 'string' ? draft.name : creative.name;
+        const nextActive = typeof draft.active === 'boolean' ? draft.active : creative.active;
+        const nextLandingPageId = typeof draft.landingPageId === 'string' ? draft.landingPageId : creative.landingPageId;
+        const nextLandingPageUrl = typeof draft.landingPageUrl === 'string' ? draft.landingPageUrl : creative.landingPageUrl;
+        const nextEndDate = typeof draft.endDate === 'string' ? draft.endDate : creative.endDate;
 
-        let renamed = false;
-        let lastError = '';
+        const changedName = nextName !== creative.name;
+        const changedActive = nextActive !== creative.active;
+        const changedLanding = nextLandingPageId !== creative.landingPageId || nextLandingPageUrl !== creative.landingPageUrl;
+        const changedEndDate = typeof draft.endDate === 'string' && draft.endDate !== creative.endDate;
 
-        for (const attempt of attempts) {
-          const res = await fetch(attempt.url, {
-            method: 'PATCH',
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(attempt.body)
+        if (!changedName && !changedActive && !changedLanding && !changedEndDate) {
+          successCount++;
+          results.push({ id, success: true });
+          setCreativesDrafts(prev => {
+            const next = { ...prev };
+            delete next[id];
+            return next;
           });
-
-          if (res.ok) {
-            renamed = true;
-            break;
-          }
-
-          const data = await res.json().catch(() => ({}));
-          lastError = data?.error?.message || `Creative rename failed (${res.status})`;
+          continue;
         }
 
-        if (renamed) {
+        const attempts: Array<{ url: string; body: any }> = [];
+
+        const baseBody: Record<string, any> = { id };
+        const baseMask: string[] = [];
+
+        if (changedName) {
+          baseBody.name = nextName;
+          baseMask.push('name');
+        }
+
+        if (changedActive) {
+          baseBody.active = nextActive;
+          baseMask.push('active');
+        }
+
+        if (changedLanding) {
+          if (nextLandingPageUrl) {
+            attempts.push({
+              url: `/api/cm360/userprofiles/${profileId}/creatives/${id}?updateMask=${encodeURIComponent([...baseMask, 'clickTags'].join(','))}`,
+              body: {
+                ...baseBody,
+                clickTags: [{
+                  eventName: 'EXIT',
+                  clickThroughUrl: {
+                    customClickThroughUrl: nextLandingPageUrl,
+                  },
+                }],
+              }
+            });
+          }
+
+          if (nextLandingPageId) {
+            attempts.push({
+              url: `/api/cm360/userprofiles/${profileId}/creatives/${id}?updateMask=${encodeURIComponent([...baseMask, 'clickTags'].join(','))}`,
+              body: {
+                ...baseBody,
+                clickTags: [{
+                  eventName: 'EXIT',
+                  clickThroughUrl: {
+                    advertiserLandingPageId: nextLandingPageId,
+                  },
+                }],
+              }
+            });
+          }
+        }
+
+        if (baseMask.length > 0) {
+          attempts.push({
+            url: `/api/cm360/userprofiles/${profileId}/creatives/${id}?updateMask=${encodeURIComponent(baseMask.join(','))}`,
+            body: baseBody
+          });
+        }
+
+        attempts.push({
+          url: `/api/cm360/userprofiles/${profileId}/creatives?id=${encodeURIComponent(id)}`,
+          body: {
+            ...baseBody,
+            ...(changedLanding && nextLandingPageUrl ? {
+              clickTags: [{
+                eventName: 'EXIT',
+                clickThroughUrl: {
+                  customClickThroughUrl: nextLandingPageUrl,
+                },
+              }],
+            } : {}),
+          }
+        });
+
+        let creativePatchSuccess = !changedName && !changedActive && !changedLanding;
+        let endDatePatchSuccess = !changedEndDate;
+        let lastError = '';
+
+        if (!creativePatchSuccess) {
+          for (const attempt of attempts) {
+            const res = await fetch(attempt.url, {
+              method: 'PATCH',
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(attempt.body)
+            });
+
+            if (res.ok) {
+              creativePatchSuccess = true;
+              break;
+            }
+
+            const data = await res.json().catch(() => ({}));
+            lastError = data?.error?.message || `Creative update failed (${res.status}: ${res.statusText})`;
+          }
+        }
+
+        if (changedEndDate && creativePatchSuccess) {
+          const creativeAds = ads.filter((ad) => ad.creativeIds.includes(id));
+
+          if (creativeAds.length === 0) {
+            endDatePatchSuccess = false;
+            lastError = 'No ads linked to this creative. End Date is applied to Ads in CM360.';
+          } else {
+            const isoEndTime = `${nextEndDate}T23:59:59.000Z`;
+
+            for (const ad of creativeAds) {
+              const patchAttempts = [
+                {
+                  url: `/api/cm360/userprofiles/${profileId}/ads/${ad.id}?updateMask=endTime`,
+                  body: { id: ad.id, endTime: isoEndTime }
+                },
+                {
+                  url: `/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(ad.id)}`,
+                  body: { id: ad.id, endTime: isoEndTime }
+                }
+              ];
+
+              let adPatched = false;
+              for (const patchAttempt of patchAttempts) {
+                const adRes = await fetch(patchAttempt.url, {
+                  method: 'PATCH',
+                  headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify(patchAttempt.body)
+                });
+
+                if (adRes.ok) {
+                  adPatched = true;
+                  break;
+                }
+
+                const adData = await adRes.json().catch(() => ({}));
+                lastError = adData?.error?.message || `Ad end date update failed (${adRes.status}: ${adRes.statusText})`;
+              }
+
+              if (!adPatched) {
+                endDatePatchSuccess = false;
+                break;
+              }
+            }
+          }
+        } else if (changedEndDate && !creativePatchSuccess) {
+          endDatePatchSuccess = false;
+        }
+
+        if (creativePatchSuccess && endDatePatchSuccess) {
           successCount++;
           results.push({ id, success: true });
 
-          setCreatives(prev => prev.map(c => c.id === id ? { ...c, name: draft.name as string, isDraft: false } : c));
+          setCreatives(prev => prev.map(c => c.id === id ? {
+            ...c,
+            ...(changedName ? { name: nextName } : {}),
+            ...(changedActive ? { active: nextActive, status: nextActive ? 'Active' : 'Paused' } : {}),
+            ...(changedLanding ? {
+              landingPageId: nextLandingPageId,
+              landingPageUrl: nextLandingPageUrl,
+            } : {}),
+            ...(changedEndDate ? { endDate: nextEndDate } : {}),
+            isDraft: false,
+          } : c));
           setCreativesDrafts(prev => {
             const next = { ...prev };
             delete next[id];
@@ -1775,12 +1981,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           });
         } else {
           failedCount++;
-          results.push({ id, success: false, error: lastError || 'Unknown error' });
+          const unsupportedHint = changedLanding
+            ? ' Some creative types do not support click-through landing updates via this endpoint.'
+            : '';
+          results.push({ id, success: false, error: `${lastError || 'Unknown error'}${unsupportedHint}` });
         }
       } catch (e: any) {
         failedCount++;
         results.push({ id, success: false, error: e.message || 'Network error' });
       }
+    }
+
+    if (successCount > 0 && selectedAdvertiser) {
+      await fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
     }
 
     return { success: successCount, failed: failedCount, results };

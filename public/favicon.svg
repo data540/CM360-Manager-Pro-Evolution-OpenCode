@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CM360 Pro favicon">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="45%" r="70%">
+      <stop offset="0%" stop-color="#0a3a8a"/>
+      <stop offset="100%" stop-color="#061b49"/>
+    </radialGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="0.8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="10" fill="url(#bg)"/>
+  <g stroke="#57f2b5" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+    <polygon points="32,9 50,19.5 50,40.5 32,51 14,40.5 14,19.5"/>
+    <polygon points="32,18 42,23.8 42,35.2 32,41 22,35.2 22,23.8"/>
+    <polygon points="32,26.5 36.8,29.3 36.8,34.7 32,37.5 27.2,34.7 27.2,29.3"/>
+  </g>
+</svg>
