@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Placement, Status } from '../types';
 import BulkNamingModal, { applyBulkNamingConfig } from './BulkNamingModal';
@@ -63,6 +63,16 @@ const PlacementGrid: React.FC = () => {
     status: 130,
     dates: 230,
   };
+  const columnConstraints: Record<string, { min: number; max: number }> = {
+    name: { min: 200, max: 900 },
+    site: { min: 100, max: 400 },
+    dimensions: { min: 80, max: 300 },
+    type: { min: 80, max: 250 },
+    status: { min: 100, max: 300 },
+    dates: { min: 180, max: 500 },
+  };
+  const [resizingColumn, setResizingColumn] = useState<string | null>(null);
+  const resizingRef = useRef(false);
   const [columnWidths, setColumnWidths] = useState(() => {
     if (typeof window === 'undefined') return defaultColumnWidths;
     try {
@@ -94,8 +104,9 @@ const PlacementGrid: React.FC = () => {
     setSiteFilter('all');
   }, [selectedCampaign?.id]);
 
+  // Persist column widths only when not actively dragging (mouseup triggers save)
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || resizingRef.current) return;
     window.localStorage.setItem('placementGridColumnWidths', JSON.stringify(columnWidths));
   }, [columnWidths]);
 
@@ -282,12 +293,16 @@ const PlacementGrid: React.FC = () => {
   const startResize = (column: keyof typeof columnWidths, startX: number, startWidth: number) => {
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
+    resizingRef.current = true;
+    setResizingColumn(column);
+
+    const constraints = columnConstraints[column] || { min: 80, max: 900 };
 
     const onMouseMove = (event: MouseEvent) => {
       const delta = event.clientX - startX;
       setColumnWidths((prev) => ({
         ...prev,
-        [column]: Math.max(120, Math.min(900, startWidth + delta)),
+        [column]: Math.max(constraints.min, Math.min(constraints.max, startWidth + delta)),
       }));
     };
 
@@ -296,10 +311,24 @@ const PlacementGrid: React.FC = () => {
       window.removeEventListener('mouseup', onMouseUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      resizingRef.current = false;
+      setResizingColumn(null);
+      // Persist to localStorage on drag end
+      setColumnWidths((prev) => {
+        window.localStorage.setItem('placementGridColumnWidths', JSON.stringify(prev));
+        return prev;
+      });
     };
 
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const resetColumnWidth = (column: keyof typeof columnWidths) => {
+    setColumnWidths((prev) => ({
+      ...prev,
+      [column]: defaultColumnWidths[column],
+    }));
   };
 
   return (
@@ -407,7 +436,7 @@ const PlacementGrid: React.FC = () => {
 
       <div className="flex-1 overflow-auto relative z-0 custom-scrollbar">
         <div className="list-surface m-4 rounded-2xl border border-[#2a4163] bg-[#152542] overflow-hidden">
-        <table className="w-full text-left border-collapse min-w-[1000px] text-sm">
+        <table className="w-full text-left border-collapse min-w-[1000px] text-sm" style={{ tableLayout: 'fixed' }}>
           <colgroup>
             <col style={{ width: 48 }} />
             <col style={{ width: columnWidths.name }} />
@@ -428,17 +457,62 @@ const PlacementGrid: React.FC = () => {
                   onChange={toggleSelectAll}
                 />
               </th>
-              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">
+               <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">
                 <div className="flex items-center gap-2 cursor-pointer hover:text-slate-300 transition-colors">
                   Placement Name <ArrowUpDown className="w-3 h-3" />
                 </div>
-                 <div className="absolute -right-1 top-0 h-full w-3 cursor-col-resize hover:bg-blue-500/20" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('name', e.clientX, columnWidths.name); }} />
+                 <div 
+                   className={`absolute -right-1 top-0 h-full w-3 cursor-col-resize transition-colors hover:bg-blue-500/20 border-r border-slate-700/50 ${resizingColumn === 'name' ? 'bg-blue-500/40' : ''}`} 
+                   onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('name', e.clientX, columnWidths.name); }}
+                   onDoubleClick={() => resetColumnWidth('name')}
+                   title="Double-click to reset width"
+                 />
                </th>
-              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Placement ID<div className="absolute -right-1 top-0 h-full w-3 cursor-col-resize hover:bg-blue-500/20" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('site', e.clientX, columnWidths.site); }} /></th>
-              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Dimensions<div className="absolute -right-1 top-0 h-full w-3 cursor-col-resize hover:bg-blue-500/20" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('dimensions', e.clientX, columnWidths.dimensions); }} /></th>
-              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Type<div className="absolute -right-1 top-0 h-full w-3 cursor-col-resize hover:bg-blue-500/20" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('type', e.clientX, columnWidths.type); }} /></th>
-              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Status<div className="absolute -right-1 top-0 h-full w-3 cursor-col-resize hover:bg-blue-500/20" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('status', e.clientX, columnWidths.status); }} /></th>
-              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">Flight Dates<div className="absolute -right-1 top-0 h-full w-3 cursor-col-resize hover:bg-blue-500/20" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('dates', e.clientX, columnWidths.dates); }} /></th>
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">
+                Placement ID
+                <div 
+                  className={`absolute -right-1 top-0 h-full w-3 cursor-col-resize transition-colors hover:bg-blue-500/20 border-r border-slate-700/50 ${resizingColumn === 'site' ? 'bg-blue-500/40' : ''}`} 
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('site', e.clientX, columnWidths.site); }}
+                  onDoubleClick={() => resetColumnWidth('site')}
+                  title="Double-click to reset width"
+                />
+              </th>
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">
+                Dimensions
+                <div 
+                  className={`absolute -right-1 top-0 h-full w-3 cursor-col-resize transition-colors hover:bg-blue-500/20 border-r border-slate-700/50 ${resizingColumn === 'dimensions' ? 'bg-blue-500/40' : ''}`} 
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('dimensions', e.clientX, columnWidths.dimensions); }}
+                  onDoubleClick={() => resetColumnWidth('dimensions')}
+                  title="Double-click to reset width"
+                />
+              </th>
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">
+                Type
+                <div 
+                  className={`absolute -right-1 top-0 h-full w-3 cursor-col-resize transition-colors hover:bg-blue-500/20 border-r border-slate-700/50 ${resizingColumn === 'type' ? 'bg-blue-500/40' : ''}`} 
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('type', e.clientX, columnWidths.type); }}
+                  onDoubleClick={() => resetColumnWidth('type')}
+                  title="Double-click to reset width"
+                />
+              </th>
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">
+                Status
+                <div 
+                  className={`absolute -right-1 top-0 h-full w-3 cursor-col-resize transition-colors hover:bg-blue-500/20 border-r border-slate-700/50 ${resizingColumn === 'status' ? 'bg-blue-500/40' : ''}`} 
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('status', e.clientX, columnWidths.status); }}
+                  onDoubleClick={() => resetColumnWidth('status')}
+                  title="Double-click to reset width"
+                />
+              </th>
+              <th className="p-4 text-xs font-bold uppercase tracking-widest text-slate-400 relative">
+                Flight Dates
+                <div 
+                  className={`absolute -right-1 top-0 h-full w-3 cursor-col-resize transition-colors hover:bg-blue-500/20 border-r border-slate-700/50 ${resizingColumn === 'dates' ? 'bg-blue-500/40' : ''}`} 
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize('dates', e.clientX, columnWidths.dates); }}
+                  onDoubleClick={() => resetColumnWidth('dates')}
+                  title="Double-click to reset width"
+                />
+              </th>
               <th className="p-4 w-12"></th>
             </tr>
           </thead>
@@ -493,27 +567,27 @@ const PlacementGrid: React.FC = () => {
                     </div>
                   )}
                 </td>
-                <td className="p-4 text-base font-semibold text-slate-200 tracking-tight font-mono">
+                <td className="p-4 text-base font-semibold text-slate-200 tracking-tight font-mono truncate" title={p.cmId || p.id}>
                   {p.cmId || p.id}
                 </td>
-                <td className="p-4">
-                  <span className="inline-flex px-2.5 py-1 rounded bg-slate-700/40 text-sm font-bold text-slate-200 border border-slate-500/40 group-hover:border-blue-500/20 transition-all">
+                <td className="p-4 truncate">
+                  <span className="inline-flex px-2.5 py-1 rounded bg-slate-700/40 text-sm font-bold text-slate-200 border border-slate-500/40 group-hover:border-blue-500/20 transition-all truncate" title={p.size}>
                     {p.size}
                   </span>
                 </td>
-                <td className="p-4">
-                  <span className={`text-sm font-bold uppercase tracking-widest ${
+                <td className="p-4 truncate">
+                  <span className={`text-sm font-bold uppercase tracking-widest truncate ${
                     p.type === 'Video' ? 'text-amber-500/80' : p.type === 'Native' ? 'text-emerald-500/80' : 'text-blue-500/80'
-                  }`}>
+                  }`} title={p.type}>
                     {p.type}
                   </span>
                 </td>
-                <td className="p-4">
-                  <div className="flex items-center gap-2">
+                <td className="p-4 truncate">
+                  <div className="flex items-center gap-2 truncate">
                     {editingId === p.id && editingField === 'status' ? (
                       <select
                         autoFocus
-                        className="bg-slate-950 border border-blue-500 rounded text-sm font-bold uppercase py-1 px-2 outline-none"
+                        className="bg-slate-950 border border-blue-500 rounded text-sm font-bold uppercase py-1 px-2 outline-none w-full"
                         value={p.status}
                         onChange={(e) => {
                           updatePlacementDraft(p.id, { status: e.target.value as Status });
@@ -532,7 +606,7 @@ const PlacementGrid: React.FC = () => {
                       </select>
                     ) : (
                       <div 
-                        className="flex items-center gap-2 cursor-pointer group/status"
+                        className="flex items-center gap-2 cursor-pointer group/status truncate"
                         onClick={() => {
                           setEditingId(p.id);
                           setEditingField('status');
@@ -540,33 +614,33 @@ const PlacementGrid: React.FC = () => {
                       >
                         {placementsDrafts[p.id] && placementsDrafts[p.id].isDraft ? (
                           <>
-                            <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                            <span className="text-sm font-bold uppercase text-amber-500">Draft ({p.status})</span>
+                            <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                            <span className="text-sm font-bold uppercase text-amber-500 truncate">Draft ({p.status})</span>
                           </>
                         ) : (
                           <>
-                            <div className={`w-1.5 h-1.5 rounded-full ${p.status === 'Active' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-slate-600'}`} />
-                            <span className="text-sm font-bold uppercase text-slate-200">{p.status}</span>
+                            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${p.status === 'Active' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-slate-600'}`} />
+                            <span className="text-sm font-bold uppercase text-slate-200 truncate">{p.status}</span>
                           </>
                         )}
-                        <Edit3 className="w-2.5 h-2.5 opacity-0 group-hover/status:opacity-100 transition-opacity text-slate-500" />
+                        <Edit3 className="w-2.5 h-2.5 opacity-0 group-hover/status:opacity-100 transition-opacity text-slate-500 shrink-0" />
                       </div>
                     )}
                   </div>
                 </td>
-                <td className="p-4 text-base text-slate-200 font-medium">
+                <td className="p-4 text-base text-slate-200 font-medium truncate">
                   {editingId === p.id && editingField === 'dates' ? (
                     <div className="flex items-center gap-1">
                       <input 
                         type="date"
-                        className="bg-slate-950 border border-blue-500 rounded px-2 py-1 text-sm outline-none text-slate-100"
+                        className="bg-slate-950 border border-blue-500 rounded px-2 py-1 text-sm outline-none text-slate-100 min-w-0 flex-1"
                         value={editStartDate}
                         onChange={(e) => setEditStartDate(e.target.value)}
                       />
-                      <span className="text-slate-800">—</span>
+                      <span className="text-slate-800 shrink-0">—</span>
                       <input 
                         type="date"
-                        className="bg-slate-950 border border-blue-500 rounded px-2 py-1 text-sm outline-none text-slate-100"
+                        className="bg-slate-950 border border-blue-500 rounded px-2 py-1 text-sm outline-none text-slate-100 min-w-0 flex-1"
                         value={editEndDate}
                         onChange={(e) => setEditEndDate(e.target.value)}
                       />
@@ -576,23 +650,24 @@ const PlacementGrid: React.FC = () => {
                           setEditingId(null);
                           setEditingField(null);
                         }}
-                        className="p-1 bg-blue-600 rounded text-white hover:bg-blue-500"
+                        className="p-1 bg-blue-600 rounded text-white hover:bg-blue-500 shrink-0"
                       >
                         <RefreshCw className="w-3 h-3" />
                       </button>
                     </div>
                   ) : (
                     <div 
-                      className="flex items-center gap-2 cursor-pointer group/dates"
+                      className="flex items-center gap-2 cursor-pointer group/dates truncate"
                       onClick={() => {
                         setEditingId(p.id);
                         setEditingField('dates');
                         setEditStartDate(p.startDate);
                         setEditEndDate(p.endDate);
                       }}
+                      title={`${p.startDate} — ${p.endDate}`}
                     >
-                      <span>{p.startDate} <span className="mx-1 text-slate-800">—</span> {p.endDate}</span>
-                      <Edit3 className="w-3 h-3 opacity-0 group-hover/dates:opacity-100 transition-opacity text-slate-500" />
+                      <span className="truncate">{p.startDate} <span className="mx-1 text-slate-800">—</span> {p.endDate}</span>
+                      <Edit3 className="w-3 h-3 opacity-0 group-hover/dates:opacity-100 transition-opacity text-slate-500 shrink-0" />
                     </div>
                   )}
                 </td>
