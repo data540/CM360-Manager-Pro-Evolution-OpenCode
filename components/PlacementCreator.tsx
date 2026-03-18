@@ -118,42 +118,66 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
 
   const extractTechToken = (fullName: string) => {
     const parts = fullName.split('_').filter(Boolean);
-    // Naming schema: brand-iso, site, campaign, channel, funnel, tech, device, format, size
-    // Tech is the 7th taxonomy field but token index 5 because brand+iso are combined.
-    const byPosition = parts[5] || '';
-
     const normalizedTechOptions = new Set(NAMING_TAXONOMY.Tech.map((value) => normalizeToken(value)));
+    
+    // Check if any part matches the tech catalog
     const byCatalog = parts.find((token) => normalizedTechOptions.has(normalizeToken(token))) || '';
+    if (byCatalog) return byCatalog;
 
-    return byCatalog || byPosition;
+    // Naming schema fallback: brand-iso, site, campaign, channel, funnel, tech, device, format, size
+    // Tech is index 5 or 6 depending on brand-iso combination
+    return parts[5] || parts[6] || '';
   };
 
-  const findSiteIdFromName = (fullName: string): { siteId: string | null; source: 'tech-match' | 'no-match'; techToken: string } => {
+  const extractSiteToken = (fullName: string) => {
     const parts = fullName.split('_').filter(Boolean);
+    const normalizedSiteOptions = new Set(NAMING_TAXONOMY.Sites.map((value) => normalizeToken(value)));
+    
+    // 1. Try standard position (index 1)
+    const atPosition1 = parts[1] || '';
+    if (normalizedSiteOptions.has(normalizeToken(atPosition1))) return atPosition1;
+
+    // 2. Scan all parts for a catalog match
+    return parts.find((token) => normalizedSiteOptions.has(normalizeToken(token))) || '';
+  };
+
+  const findSiteIdFromName = (fullName: string): { siteId: string | null; source: 'site-match' | 'tech-match' | 'no-match'; matchedToken: string } => {
+    const siteToken = extractSiteToken(fullName);
     const techToken = extractTechToken(fullName);
-    const normalizedTechToken = normalizeToken(techToken);
-    if (!normalizedTechToken) {
-      return { siteId: null, source: 'no-match', techToken };
+
+    const tryMatch = (token: string) => {
+      const normalized = normalizeToken(token);
+      if (!normalized) return null;
+
+      const scored = sites
+        .map((site) => {
+          const normalizedSiteName = normalizeToken(site.name);
+          if (!normalizedSiteName) return { site, score: 0 };
+          if (normalizedSiteName === normalized) return { site, score: 100 };
+          if (normalizedSiteName.startsWith(normalized)) return { site, score: 90 };
+          if (normalizedSiteName.includes(normalized)) return { site, score: 70 };
+          if (normalized.includes(normalizedSiteName)) return { site, score: 60 };
+          return { site, score: 0 };
+        })
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+      return scored.length > 0 ? scored[0].site.id : null;
+    };
+
+    // Priority 1: Match by Site Token
+    const siteIdFromSite = tryMatch(siteToken);
+    if (siteIdFromSite) {
+      return { siteId: siteIdFromSite, source: 'site-match', matchedToken: siteToken };
     }
 
-    const scored = sites
-      .map((site) => {
-        const normalizedSiteName = normalizeToken(site.name);
-        if (!normalizedSiteName) return { site, score: 0 };
-        if (normalizedSiteName === normalizedTechToken) return { site, score: 100 };
-        if (normalizedSiteName.startsWith(normalizedTechToken)) return { site, score: 90 };
-        if (normalizedSiteName.includes(normalizedTechToken)) return { site, score: 70 };
-        if (normalizedTechToken.includes(normalizedSiteName)) return { site, score: 60 };
-        return { site, score: 0 };
-      })
-      .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score);
-
-    if (scored.length > 0) {
-      return { siteId: scored[0].site.id, source: 'tech-match', techToken };
+    // Priority 2: Fallback to Tech Token
+    const siteIdFromTech = tryMatch(techToken);
+    if (siteIdFromTech) {
+      return { siteId: siteIdFromTech, source: 'tech-match', matchedToken: techToken };
     }
 
-    return { siteId: null, source: 'no-match', techToken };
+    return { siteId: null, source: 'no-match', matchedToken: siteToken || techToken };
   };
 
   const parsedPlainRows = useMemo(() => {
@@ -174,7 +198,7 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
           size,
           type: detected.type,
           compatibility: detected.compatibility,
-          techToken: siteMatch.techToken,
+          matchedToken: siteMatch.matchedToken,
           siteSource: siteMatch.source,
           siteId,
           siteName,
@@ -191,7 +215,7 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
       return;
     }
 
-    const firstMatched = parsedPlainRows.find((row) => row.siteId && row.siteSource === 'tech-match');
+    const firstMatched = parsedPlainRows.find((row) => row.siteId && (row.siteSource === 'site-match' || row.siteSource === 'tech-match'));
     if (firstMatched?.siteId) {
       if (firstMatched.siteId !== selectedSiteId) {
         setSelectedSiteId(firstMatched.siteId);
@@ -378,8 +402,9 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
                         <div key={row.sourceName} className={`p-2 rounded-lg border text-[10px] ${row.isValid ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-300' : 'border-amber-500/30 bg-amber-500/5 text-amber-300'}`}>
                           <p className="font-mono truncate">{row.normalizedName}</p>
                           <p className="mt-1 text-[9px]">
-                            size: {row.size || 'not detected'} · tech: {row.techToken || 'n/a'} · site: {row.siteName || 'no site match'}
-                            {row.siteSource === 'no-match' ? ' (requires CM360 Site Mapping selection)' : ''}
+                            size: {row.size || 'not detected'} · site: {row.siteName || 'no site match'}
+                            {row.siteSource !== 'no-match' && ` (matched from '${row.matchedToken}')`}
+                            {row.siteSource === 'no-match' && ' (requires CM360 Site Mapping selection)'}
                           </p>
                         </div>
                       ))}
@@ -530,7 +555,7 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
                 </h3>
                 <div className="p-4 bg-slate-950/50 rounded-2xl border border-slate-800 text-xs text-slate-400 leading-relaxed">
                   <p>In plain-text mode, <span className="text-blue-400 font-semibold">Format & Dimensions</span> are read from the naming string.</p>
-                  <p className="mt-2">Site is resolved from token #7 (TECH). If no CM360 match is found, CM360 Site Mapping stays blank and must be selected manually.</p>
+                  <p className="mt-2">Site is resolved by scanning the string for tokens matching the <span className="text-emerald-400 font-semibold">Site Catalog</span> or <span className="text-emerald-400 font-semibold">Tech Catalog</span>. If no match is found, select it manually below.</p>
                 </div>
               </section>
             )}
