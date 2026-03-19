@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { CM360_SIZES, PLACEMENT_STRATEGIES, NAMING_TAXONOMY } from '../constants';
-import { X, Plus, Layers, Check, Info, Calendar, Globe, Settings2, Tag, AlertCircle } from 'lucide-react';
+import { X, Plus, Layers, Check, Info, Calendar, Globe, Settings2, Tag, AlertCircle, RefreshCw } from 'lucide-react';
 import { Placement } from '../types';
 
 interface PlacementCreatorProps {
@@ -10,7 +10,8 @@ interface PlacementCreatorProps {
 }
 
 const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
-  const { selectedCampaign, sites, addPlacements } = useApp();
+  const { selectedCampaign, sites, addPlacements, fetchSites } = useApp();
+  const [isSyncing, setIsSyncing] = useState(false);
   const todayISO = useMemo(() => new Date().toISOString().split('T')[0], []);
   const plus30DaysISO = useMemo(() => {
     const d = new Date();
@@ -117,7 +118,8 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
   };
 
   const extractTechToken = (fullName: string) => {
-    const parts = fullName.split('_').filter(Boolean);
+    // Exclusion: Ignore 'kpi360'
+    const parts = fullName.split('_').filter(p => p.toLowerCase() !== 'kpi360' && p.trim() !== '');
     const normalizedTechOptions = new Set(NAMING_TAXONOMY.Tech.map((value) => normalizeToken(value)));
     
     // Check if any part matches the tech catalog
@@ -130,7 +132,8 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
   };
 
   const extractSiteToken = (fullName: string) => {
-    const parts = fullName.split('_').filter(Boolean);
+    // Exclusion: Ignore 'kpi360'
+    const parts = fullName.split('_').filter(p => p.toLowerCase() !== 'kpi360' && p.trim() !== '');
     const normalizedSiteOptions = new Set(NAMING_TAXONOMY.Sites.map((value) => normalizeToken(value)));
     
     // 1. Try standard position (index 1)
@@ -141,13 +144,27 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
     return parts.find((token) => normalizedSiteOptions.has(normalizeToken(token))) || '';
   };
 
-  const findSiteIdFromName = (fullName: string): { siteId: string | null; source: 'site-match' | 'tech-match' | 'no-match'; matchedToken: string } => {
+  const findSiteIdFromName = (fullName: string): { siteId: string | null; source: 'priority-match' | 'site-match' | 'tech-match' | 'no-match'; matchedToken: string } => {
+    const lowerName = fullName.toLowerCase();
+    
+    // Priority Rule 1: 'prem' maps to "DV360 Premium"
+    if (lowerName.includes('_prem_')) {
+      const premiumSite = sites.find(s => s.name === "DV360 Premium");
+      if (premiumSite) return { siteId: premiumSite.id, source: 'priority-match', matchedToken: 'prem' };
+    }
+
+    // Priority Rule 2: 'addor' maps to "addor"
+    if (lowerName.includes('addor')) {
+      const addorSite = sites.find(s => s.name === "addor");
+      if (addorSite) return { siteId: addorSite.id, source: 'priority-match', matchedToken: 'addor' };
+    }
+
     const siteToken = extractSiteToken(fullName);
     const techToken = extractTechToken(fullName);
 
     const tryMatch = (token: string) => {
       const normalized = normalizeToken(token);
-      if (!normalized) return null;
+      if (!normalized || normalized === 'kpi360') return null;
 
       const scored = sites
         .map((site) => {
@@ -215,7 +232,7 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
       return;
     }
 
-    const firstMatched = parsedPlainRows.find((row) => row.siteId && (row.siteSource === 'site-match' || row.siteSource === 'tech-match'));
+    const firstMatched = parsedPlainRows.find((row) => row.siteId && (row.siteSource === 'priority-match' || row.siteSource === 'site-match' || row.siteSource === 'tech-match'));
     if (firstMatched?.siteId) {
       if (firstMatched.siteId !== selectedSiteId) {
         setSelectedSiteId(firstMatched.siteId);
@@ -227,6 +244,15 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
       setSelectedSiteId('');
     }
   }, [creationMode, parsedPlainRows, selectedSiteId]);
+
+  const handleSyncSites = async () => {
+    setIsSyncing(true);
+    try {
+      await fetchSites();
+    } finally {
+      setTimeout(() => setIsSyncing(false), 600);
+    }
+  };
 
   const handleCreate = () => {
     if (!selectedCampaign) return;
@@ -420,9 +446,19 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
 
             <div className="grid grid-cols-2 gap-8">
               <section className="space-y-4">
-                <h3 className="text-[10px] uppercase font-bold tracking-widest text-slate-500 flex items-center gap-2">
-                  <Globe className="w-3 h-3" /> CM360 Site Mapping
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[10px] uppercase font-bold tracking-widest text-slate-500 flex items-center gap-2">
+                    <Globe className="w-3 h-3" /> CM360 Site Mapping
+                  </h3>
+                  <button 
+                    onClick={handleSyncSites}
+                    disabled={isSyncing}
+                    className="flex items-center gap-1.5 px-2 py-1 rounded bg-slate-950 border border-slate-800 text-[9px] font-bold text-slate-400 hover:text-blue-400 hover:border-blue-500/50 transition-all disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-2.5 h-2.5 ${isSyncing ? 'animate-spin text-blue-500' : ''}`} />
+                    {isSyncing ? 'SYNCING...' : 'SYNC SITES'}
+                  </button>
+                </div>
                 {sites.length === 0 ? (
                   <div className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-500 italic">
                     Loading sites from CM360...
