@@ -160,6 +160,19 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
     }
 
     const siteToken = extractSiteToken(fullName);
+
+    // Priority Rule 3: 'nat' maps to sites containing "Nativa" + the site token
+    if (lowerName.includes('_nat_') && siteToken) {
+      const normalizedSiteToken = normalizeToken(siteToken);
+      const nativeSite = sites.find(s => {
+        const nName = s.name.toLowerCase();
+        return nName.includes('nativa') && (nName.includes(normalizedSiteToken) || nName.includes(siteToken.toLowerCase()));
+      });
+      if (nativeSite) {
+        return { siteId: nativeSite.id, source: 'priority-match', matchedToken: `nat + ${siteToken}` };
+      }
+    }
+
     const techToken = extractTechToken(fullName);
 
     const tryMatch = (token: string) => {
