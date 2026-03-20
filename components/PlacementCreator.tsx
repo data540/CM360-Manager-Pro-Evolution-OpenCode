@@ -160,16 +160,47 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
     }
 
     const siteToken = extractSiteToken(fullName);
+    const allTokens = fullName
+      .split('_')
+      .map((part) => normalizeToken(part))
+      .filter(Boolean);
+    const genericTokens = new Set([
+      'kpi360',
+      'nat',
+      'prs',
+      'rtg',
+      'gen',
+      'desktop',
+      'mobile',
+      'video',
+      'display',
+    ]);
+    const relevantTokens = allTokens.filter((token) => {
+      if (genericTokens.has(token)) return false;
+      if (/^\d{4}$/.test(token)) return false;
+      if (/^\d+x\d+$/.test(token)) return false;
+      return true;
+    });
 
-    // Priority Rule 3: 'nat' maps to sites containing "Nativa" + the site token
-    if (lowerName.includes('_nat_') && siteToken) {
-      const normalizedSiteToken = normalizeToken(siteToken);
-      const nativeSite = sites.find(s => {
-        const nName = s.name.toLowerCase();
-        return nName.includes('nativa') && (nName.includes(normalizedSiteToken) || nName.includes(siteToken.toLowerCase()));
-      });
-      if (nativeSite) {
-        return { siteId: nativeSite.id, source: 'priority-match', matchedToken: `nat + ${siteToken}` };
+    // Priority Rule 3: names containing _nat_ must prioritize sites containing "Nativa"
+    if (lowerName.includes('_nat_')) {
+      const nativeCandidates = sites.filter((site) => site.name.toLowerCase().includes('nativa'));
+      if (nativeCandidates.length > 0) {
+        const scoredNative = nativeCandidates
+          .map((site) => {
+            const normalizedSiteName = normalizeToken(site.name);
+            const matchedToken = relevantTokens.find((token) => normalizedSiteName.includes(token)) || '';
+            const score = matchedToken ? 100 : (siteToken && normalizedSiteName.includes(normalizeToken(siteToken)) ? 80 : 0);
+            return { site, score, matchedToken };
+          })
+          .filter((item) => item.score > 0)
+          .sort((a, b) => b.score - a.score);
+
+        if (scoredNative.length > 0) {
+          const best = scoredNative[0];
+          const tokenLabel = best.matchedToken || normalizeToken(siteToken) || 'nativa';
+          return { siteId: best.site.id, source: 'priority-match', matchedToken: `nat + ${tokenLabel}` };
+        }
       }
     }
 
