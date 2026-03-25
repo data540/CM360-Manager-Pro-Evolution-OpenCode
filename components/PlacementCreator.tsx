@@ -153,7 +153,13 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
       if (premiumSite) return { siteId: premiumSite.id, source: 'priority-match', matchedToken: 'prem' };
     }
 
-    // Priority Rule 2: 'addor' maps to "addor"
+    // Priority Rule 2: 'vozpopuli' maps to site containing "vozpopuli"
+    if (lowerName.includes('vozpopuli')) {
+      const vozpopuliSite = sites.find((s) => normalizeToken(s.name).includes('vozpopuli'));
+      if (vozpopuliSite) return { siteId: vozpopuliSite.id, source: 'priority-match', matchedToken: 'vozpopuli' };
+    }
+
+    // Priority Rule 3: 'addor' maps to "addor"
     if (lowerName.includes('addor')) {
       const addorSite = sites.find(s => s.name === "addor");
       if (addorSite) return { siteId: addorSite.id, source: 'priority-match', matchedToken: 'addor' };
@@ -182,7 +188,7 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
       return true;
     });
 
-    // Priority Rule 3: names containing _nat_ must prioritize sites containing "Nativa"
+    // Priority Rule 4: names containing _nat_ must prioritize sites containing "Nativa"
     if (lowerName.includes('_nat_')) {
       const nativeCandidates = sites.filter((site) => site.name.toLowerCase().includes('nativa'));
       if (nativeCandidates.length > 0) {
@@ -232,7 +238,15 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
       return { siteId: siteIdFromSite, source: 'site-match', matchedToken: siteToken };
     }
 
-    // Priority 2: Fallback to Tech Token
+    // Priority 2: Fallback to any relevant token in the naming string
+    for (const token of relevantTokens) {
+      const siteIdFromToken = tryMatch(token);
+      if (siteIdFromToken) {
+        return { siteId: siteIdFromToken, source: 'site-match', matchedToken: token };
+      }
+    }
+
+    // Priority 3: Fallback to Tech Token
     const siteIdFromTech = tryMatch(techToken);
     if (siteIdFromTech) {
       return { siteId: siteIdFromTech, source: 'tech-match', matchedToken: techToken };
