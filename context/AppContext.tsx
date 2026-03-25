@@ -351,12 +351,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!accessToken || !profileId || !campaignId) return;
     try {
       console.log(`📡 Cargando placements para la campaña ${campaignId}...`);
-      const res = await fetch(`/api/cm360/userprofiles/${profileId}/placements?campaignIds=${campaignId}&maxResults=100`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      const data = await res.json();
-      if (data.placements) {
-        const fetchedPlacements: Placement[] = data.placements.map((p: any) => ({
+      const allPlacements: any[] = [];
+      let pageToken: string | undefined;
+
+      while (true) {
+        const params = new URLSearchParams({
+          campaignIds: String(campaignId),
+          maxResults: '100',
+        });
+        if (pageToken) params.set('pageToken', pageToken);
+
+        const res = await fetch(`/api/cm360/userprofiles/${profileId}/placements?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData?.error?.message || `Error ${res.status}: ${res.statusText}`);
+        }
+
+        const data = await res.json();
+        if (Array.isArray(data.placements)) {
+          allPlacements.push(...data.placements);
+        }
+
+        if (!data.nextPageToken) break;
+        pageToken = data.nextPageToken;
+      }
+
+      if (allPlacements.length > 0) {
+        const fetchedPlacements: Placement[] = allPlacements.map((p: any) => ({
           id: p.id,
           cmId: p.id,
           name: p.name,
@@ -485,14 +509,37 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const fetchSitesInternal = async (token: string, pid: string) => {
     try {
       console.log("📡 Cargando sitios...");
-      const res = await fetch(`/api/cm360/userprofiles/${pid}/sites?maxResults=100`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (data.sites) {
-        setSites(data.sites.map((s: any) => ({ id: s.id, name: s.name, url: s.keyName })));
-        console.log(`✅ ${data.sites.length} sitios cargados.`);
+      const allSites: any[] = [];
+      let pageToken: string | undefined;
+
+      while (true) {
+        const params = new URLSearchParams({ maxResults: '100' });
+        if (pageToken) params.set('pageToken', pageToken);
+
+        const res = await fetch(`/api/cm360/userprofiles/${pid}/sites?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData?.error?.message || `Error ${res.status}: ${res.statusText}`);
+        }
+
+        const data = await res.json();
+        if (Array.isArray(data.sites)) {
+          allSites.push(...data.sites);
+        }
+
+        if (!data.nextPageToken) break;
+        pageToken = data.nextPageToken;
       }
+
+      if (allSites.length > 0) {
+        setSites(allSites.map((s: any) => ({ id: s.id, name: s.name, url: s.keyName })));
+      } else {
+        setSites([]);
+      }
+      console.log(`✅ ${allSites.length} sitios cargados.`);
     } catch (e) {
       console.error("Fetch sites error:", e);
     }

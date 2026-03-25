@@ -40,6 +40,7 @@ const PlacementGrid: React.FC = () => {
     assignCreativeToPlacement,
     sites,
     fetchSites,
+    fetchPlacements,
   } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [siteFilter, setSiteFilter] = useState('all');
@@ -55,6 +56,7 @@ const PlacementGrid: React.FC = () => {
   const [editEndDate, setEditEndDate] = useState('');
   const [isBulkNamingOpen, setIsBulkNamingOpen] = useState(false);
   const [isBulkActionsOpen, setIsBulkActionsOpen] = useState(false);
+  const [isSyncingSites, setIsSyncingSites] = useState(false);
   const defaultColumnWidths = {
     name: 360,
     site: 170,
@@ -155,12 +157,38 @@ const PlacementGrid: React.FC = () => {
   const siteOptions = Array.from(new Set(placementRows
     .filter((p) => !selectedCampaign || p.campaignId === selectedCampaign.id)
     .map((p) => p.siteId))).map((siteId) => {
-    const match = sites.find((site) => site.id === siteId);
-    return {
-      id: siteId,
-      name: match?.name || `Site ${siteId}`,
-    };
-  });
+      const match = sites.find((site) => site.id === siteId);
+      return {
+        id: siteId,
+        name: match?.name || `Site ${siteId}`,
+      };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+
+  const handleSyncSites = async () => {
+    if (!selectedCampaign) return;
+    setIsSyncingSites(true);
+    try {
+      await Promise.all([
+        fetchSites(),
+        fetchPlacements(selectedCampaign.id),
+      ]);
+      setToast({
+        show: true,
+        type: 'success',
+        message: 'Sites synced',
+        details: 'Site catalog and campaign placements were refreshed successfully.'
+      });
+    } catch (error: any) {
+      setToast({
+        show: true,
+        type: 'error',
+        message: 'Sync failed',
+        details: error?.message || 'Could not refresh CM360 sites and placements.'
+      });
+    } finally {
+      setIsSyncingSites(false);
+    }
+  };
 
   const toggleSelectAll = () => {
     if (selectedRows.size === filteredPlacements.length) {
@@ -346,7 +374,18 @@ const PlacementGrid: React.FC = () => {
         </div>
 
         <div className="min-w-[260px]">
-          <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Filter by Site</label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-[10px] uppercase font-bold text-slate-500">Filter by Site</label>
+            <button
+              onClick={handleSyncSites}
+              disabled={!selectedCampaign || isSyncingSites}
+              className="inline-flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-400 hover:border-blue-500/50 hover:text-blue-300 disabled:opacity-50"
+              title="Sync all campaign sites"
+            >
+              <RefreshCw className={`w-3 h-3 ${isSyncingSites ? 'animate-spin' : ''}`} />
+              Sync
+            </button>
+          </div>
           <select
             value={siteFilter}
             onChange={(e) => setSiteFilter(e.target.value)}
