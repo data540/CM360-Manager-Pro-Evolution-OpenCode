@@ -5,5 +5,5 @@ export const config = {
 };
 
 export default async function handler(req: any, res: any) {
-  return proxyRequest(req, res, "https://dfareporting.googleapis.com/dfareporting/v4");
+  return proxyRequest(req, res, "https://dfareporting.googleapis.com/dfareporting/v5");
 }

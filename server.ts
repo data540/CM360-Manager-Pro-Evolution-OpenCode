@@ -77,7 +77,7 @@ async function startServer() {
 
   // CM360 proxy endpoints to avoid browser CORS issues.
   app.use("/api/cm360", (req, res) =>
-    proxyRequest(req, res, "https://dfareporting.googleapis.com/dfareporting/v4", "/api/cm360"),
+    proxyRequest(req, res, "https://dfareporting.googleapis.com/dfareporting/v5", "/api/cm360"),
   );
 
   app.use("/api/cm360-upload", (req, res) =>

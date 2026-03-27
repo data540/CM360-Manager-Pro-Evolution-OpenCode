@@ -215,7 +215,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (!profilesRes.ok) {
         console.error("❌ Error en UserProfiles:", profilesRes.status, profilesData);
         if (profilesRes.status === 403) {
-          throw new Error("ERROR 403: Acceso denegado. Debes habilitar 'Campaign Manager 360 API' en tu consola de Google Cloud.");
+          const apiMessage = profilesData?.error?.message || profilesData?.error?.errors?.[0]?.message || '';
+          const reason = profilesData?.error?.errors?.[0]?.reason || '';
+          throw new Error(
+            `ERROR 403: Acceso denegado a CM360. ${apiMessage ? `Detalle: ${apiMessage}. ` : ''}` +
+            `Verifica: (1) API CM360 habilitada en el MISMO proyecto del OAuth Client ID, ` +
+            `(2) usuario con perfil/permisos en CM360, (3) scopes dfareporting/dfatrafficking concedidos.${reason ? ` [reason: ${reason}]` : ''}`
+          );
         }
         if (profilesRes.status === 401) {
           throw new Error("ERROR 401: El token ha expirado o es inválido.");
@@ -970,7 +976,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
       formData.append('file', file);
 
-      const assetRes = await fetch(`/api/cm360-upload/upload/dfareporting/v4/userprofiles/${profileId}/creativeAssets/${selectedAdvertiser.id}/creativeAssets?uploadType=multipart`, {
+      const assetRes = await fetch(`/api/cm360-upload/upload/dfareporting/v5/userprofiles/${profileId}/creativeAssets/${selectedAdvertiser.id}/creativeAssets?uploadType=multipart`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}` },
         body: formData,
@@ -1277,7 +1283,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
             formData.append('file', file);
 
-            const uploadRes = await fetch(`/api/cm360-upload/upload/dfareporting/v4/userprofiles/${profileId}/creativeAssets/${destinationAdvertiserId}/creativeAssets?uploadType=multipart`, {
+            const uploadRes = await fetch(`/api/cm360-upload/upload/dfareporting/v5/userprofiles/${profileId}/creativeAssets/${destinationAdvertiserId}/creativeAssets?uploadType=multipart`, {
               method: 'POST',
               headers: { Authorization: `Bearer ${accessToken}` },
               body: formData
