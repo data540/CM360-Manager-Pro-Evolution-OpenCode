@@ -321,9 +321,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const res = await fetch('/api/cm360/userprofiles', {
         headers: { Authorization: `Bearer ${token}` }
       });
+      if (res.status === 401) {
+        // El access token guardado de una sesión anterior ha caducado.
+        // Forzamos logout para que se muestre la pantalla de login y el
+        // usuario obtenga un token nuevo (con él se repuebla 'accounts').
+        console.warn("⚠️ Token caducado al sincronizar cuentas CM360. Cerrando sesión.");
+        logout();
+        return;
+      }
       if (!res.ok) return;
       const data = await res.json();
       if (data.items && data.items.length > 0) {
+        console.log(`✅ ${data.items.length} perfil(es) de CM360 sincronizado(s):`, data.items.map((it: any) => it.accountName || it.accountId));
         const cmAccounts: CmAccount[] = data.items.map((it: any) => ({
           profileId: it.profileId,
           accountId: it.accountId,
