@@ -32,7 +32,10 @@ const Sidebar: React.FC = () => {
     fetchLandingPages,
     landingPages,
     createCampaign,
-    accountId
+    accountId,
+    profileId,
+    accounts,
+    switchAccount
   } = useApp();
 
   const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
@@ -155,6 +158,26 @@ const Sidebar: React.FC = () => {
       </div>
 
       <div className="mb-6 space-y-4">
+        {accounts.length > 1 && (
+          <div className="relative sidebar-card">
+            <div className="flex justify-between items-center mb-1 px-2">
+              <label className="text-xs uppercase tracking-[0.14em] text-slate-400 font-bold">CM360 Account</label>
+            </div>
+            <div className="relative">
+              <select
+                className="w-full bg-[#10213c] border border-[#2a4163] text-slate-100 text-base font-semibold rounded-md py-2.5 px-3 appearance-none focus:outline-none focus:border-emerald-500 transition-colors"
+                value={profileId || ''}
+                onChange={(e) => switchAccount(e.target.value)}
+              >
+                {accounts.map(acc => (
+                  <option key={acc.profileId} value={acc.profileId}>{acc.accountName}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-2.5 w-4 h-4 text-slate-500 pointer-events-none" />
+            </div>
+          </div>
+        )}
+
         <div className="relative sidebar-card">
           <div className="flex justify-between items-center mb-1 px-2">
             <label className="text-xs uppercase tracking-[0.14em] text-slate-400 font-bold">CM360 Advertiser</label>

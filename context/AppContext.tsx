@@ -9,6 +9,12 @@ interface UserProfile {
   picture: string;
 }
 
+interface CmAccount {
+  profileId: string;
+  accountId: string;
+  accountName: string;
+}
+
 interface AppContextType {
   advertisers: Advertiser[];
   campaigns: Campaign[];
@@ -53,6 +59,8 @@ interface AppContextType {
   accessToken: string | null;
   profileId: string | null;
   accountId: string | null;
+  accounts: CmAccount[];
+  switchAccount: (profileId: string) => void;
   user: UserProfile | null;
   login: (customClientId?: string) => void;
   loginWithToken: (token: string) => Promise<{success: boolean, error?: string}>;
@@ -109,6 +117,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const getStoredAccounts = (): CmAccount[] => {
+    const saved = getLocalStorageItem('cm360_accounts');
+    if (!saved) return [];
+    try {
+      return JSON.parse(saved);
+    } catch {
+      try {
+        localStorage.removeItem('cm360_accounts');
+      } catch {
+        // ignore storage cleanup errors
+      }
+      return [];
+    }
+  };
+
   const [advertisers, setAdvertisers] = useState<Advertiser[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campaignsDrafts, setCampaignsDrafts] = useState<{ [id: string]: Partial<Campaign> & { isDraft?: boolean } }>({});
@@ -133,6 +156,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [accessToken, setAccessToken] = useState<string | null>(getLocalStorageItem('cm360_token'));
   const [profileId, setProfileId] = useState<string | null>(getLocalStorageItem('cm360_profile_id'));
   const [accountId, setAccountId] = useState<string | null>(getLocalStorageItem('cm360_account_id'));
+  const [accounts, setAccounts] = useState<CmAccount[]>(() => getStoredAccounts());
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!getLocalStorageItem('cm360_token'));
   const [user, setUser] = useState<UserProfile | null>(() => getStoredUser());
 
@@ -178,6 +202,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     };
     checkGsi();
+  }, []);
+
+  useEffect(() => {
+    // Sesiones guardadas antes de que existiera el soporte multi-cuenta no tienen
+    // 'accounts' en localStorage; lo recuperamos al arrancar sin forzar un nuevo login.
+    if (accessToken && accounts.length === 0) {
+      syncAccounts(accessToken);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleAuthSuccess = async (token: string): Promise<{success: boolean, error?: string}> => {
@@ -230,27 +263,34 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
       
       if (profilesData.items && profilesData.items.length > 0) {
-        console.log("✅ Perfil encontrado:", profilesData.items[0].profileId);
-        const pid = profilesData.items[0].profileId;
-        const accId = profilesData.items[0].accountId;
-        const userProfile = { 
-          name: userData.name || "User", 
-          email: userData.email || "No email", 
+        console.log(`✅ ${profilesData.items.length} perfil(es) de CM360 encontrado(s):`, profilesData.items.map((it: any) => it.accountName || it.accountId));
+        const cmAccounts: CmAccount[] = profilesData.items.map((it: any) => ({
+          profileId: it.profileId,
+          accountId: it.accountId,
+          accountName: it.accountName || it.accountId,
+        }));
+        const pid = cmAccounts[0].profileId;
+        const accId = cmAccounts[0].accountId;
+        const userProfile = {
+          name: userData.name || "User",
+          email: userData.email || "No email",
           picture: userData.picture || `https://api.dicebear.com/7.x/initials/svg?seed=${userData.name}`
         };
-        
+
         setAccessToken(token);
         setProfileId(pid);
         setAccountId(accId);
+        setAccounts(cmAccounts);
         setUser(userProfile);
         setIsAuthenticated(true);
         setConnectionStatus('Connected');
-        
+
         localStorage.setItem('cm360_token', token);
         localStorage.setItem('cm360_profile_id', pid);
         localStorage.setItem('cm360_account_id', accId);
+        localStorage.setItem('cm360_accounts', JSON.stringify(cmAccounts));
         localStorage.setItem('cm360_user', JSON.stringify(userProfile));
-        
+
         fetchAdvertisersInternal(token, pid);
         return { success: true };
       } else {
@@ -273,6 +313,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return { success: false, error: message };
     } finally {
       clearTimeout(timeoutId);
+    }
+  };
+
+  const syncAccounts = async (token: string) => {
+    try {
+      const res = await fetch('/api/cm360/userprofiles', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.items && data.items.length > 0) {
+        const cmAccounts: CmAccount[] = data.items.map((it: any) => ({
+          profileId: it.profileId,
+          accountId: it.accountId,
+          accountName: it.accountName || it.accountId,
+        }));
+        setAccounts(cmAccounts);
+        localStorage.setItem('cm360_accounts', JSON.stringify(cmAccounts));
+      }
+    } catch (e) {
+      console.error("Sync accounts error:", e);
     }
   };
 
@@ -1696,6 +1757,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return await handleAuthSuccess(token);
   };
 
+  const switchAccount = (newProfileId: string) => {
+    const account = accounts.find(a => a.profileId === newProfileId);
+    if (!account || !accessToken) return;
+
+    setProfileId(account.profileId);
+    setAccountId(account.accountId);
+    localStorage.setItem('cm360_profile_id', account.profileId);
+    localStorage.setItem('cm360_account_id', account.accountId);
+
+    setAdvertisers([]);
+    setSelectedAdvertiser(null);
+    setCampaigns([]);
+    setSelectedCampaign(null);
+    setPlacements([]);
+    setAds([]);
+    setSelectedAd(null);
+    setCreatives([]);
+    setSites([]);
+    setLandingPages([]);
+
+    fetchAdvertisersInternal(accessToken, account.profileId);
+  };
+
   const enterDemoMode = () => {
     setAdvertisers(MOCK_ADVERTISERS);
     setCampaigns(MOCK_CAMPAIGNS);
@@ -1725,6 +1809,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setIsAuthenticated(false);
     setAccessToken(null);
     setProfileId(null);
+    setAccountId(null);
+    setAccounts([]);
     setUser(null);
     setAds([]);
     setSelectedAd(null);
@@ -2162,7 +2248,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       selectedAdvertiser, selectedCampaign, selectedAd, currentView, isGlobalSearchActive,
       setSelectedAdvertiser, setSelectedCampaign, setSelectedAd, setCurrentView, setIsGlobalSearchActive,
       addPlacements, updateCampaignDraft, updatePlacement, updatePlacementDraft, updatePlacementName, updateAdDraft, updateCreativeDraft, updateAdName, updateCreativeName, deletePlacement, publishSelectedDrafts, publishSelectedAdDrafts, publishSelectedCreativeDrafts,
-      connectionStatus, isAuthenticated, accessToken, profileId, accountId, user, login, loginWithToken, enterDemoMode, logout,
+      connectionStatus, isAuthenticated, accessToken, profileId, accountId, accounts, switchAccount, user, login, loginWithToken, enterDemoMode, logout,
       fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchAds, fetchCreatives, fetchAllCreatives, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, pushCampaigns, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement, assignCreativeToAd, unassignCreativeFromAd, isAdsLoading
     }}>
       {children}
