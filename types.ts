@@ -55,6 +55,8 @@ export interface Creative {
   size: string;
   status: Status;
   active: boolean;
+  startDate?: string;
+  startTime?: string;
   endDate?: string;
   thumbnailUrl: string;
   placementIds: string[];

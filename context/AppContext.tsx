@@ -1945,13 +1945,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const nextLandingPageId = typeof draft.landingPageId === 'string' ? draft.landingPageId : creative.landingPageId;
         const nextLandingPageUrl = typeof draft.landingPageUrl === 'string' ? draft.landingPageUrl : creative.landingPageUrl;
         const nextEndDate = typeof draft.endDate === 'string' ? draft.endDate : creative.endDate;
+        const nextStartDate = typeof draft.startDate === 'string' ? draft.startDate : creative.startDate;
+        const nextStartTime = typeof draft.startTime === 'string' ? draft.startTime : (creative.startTime || '00:00');
 
         const changedName = nextName !== creative.name;
         const changedActive = nextActive !== creative.active;
         const changedLanding = nextLandingPageId !== creative.landingPageId || nextLandingPageUrl !== creative.landingPageUrl;
         const changedEndDate = typeof draft.endDate === 'string' && draft.endDate !== creative.endDate;
+        const changedStartDate = !!nextStartDate && (
+          (typeof draft.startDate === 'string' && draft.startDate !== creative.startDate)
+          || (typeof draft.startTime === 'string' && draft.startTime !== (creative.startTime || '00:00'))
+        );
 
-        if (!changedName && !changedActive && !changedLanding && !changedEndDate) {
+        if (!changedName && !changedActive && !changedLanding && !changedEndDate && !changedStartDate) {
           successCount++;
           results.push({ id, success: true });
           setCreativesDrafts(prev => {
@@ -2033,6 +2039,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
         let creativePatchSuccess = !changedName && !changedActive && !changedLanding;
         let endDatePatchSuccess = !changedEndDate;
+        let startDatePatchSuccess = !changedStartDate;
         let lastError = '';
 
         if (!creativePatchSuccess) {
@@ -2107,7 +2114,58 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           endDatePatchSuccess = false;
         }
 
-        if (creativePatchSuccess && endDatePatchSuccess) {
+        if (changedStartDate && creativePatchSuccess) {
+          const creativeAds = ads.filter((ad) => ad.creativeIds.includes(id));
+
+          if (creativeAds.length === 0) {
+            startDatePatchSuccess = false;
+            lastError = 'No ads linked to this creative. Start Date is applied to Ads in CM360.';
+          } else {
+            const isoStartTime = `${nextStartDate}T${nextStartTime}:00.000Z`;
+
+            for (const ad of creativeAds) {
+              const patchAttempts = [
+                {
+                  url: `/api/cm360/userprofiles/${profileId}/ads/${ad.id}?updateMask=startTime`,
+                  body: { id: ad.id, startTime: isoStartTime }
+                },
+                {
+                  url: `/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(ad.id)}`,
+                  body: { id: ad.id, startTime: isoStartTime }
+                }
+              ];
+
+              let adPatched = false;
+              for (const patchAttempt of patchAttempts) {
+                const adRes = await fetch(patchAttempt.url, {
+                  method: 'PATCH',
+                  headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify(patchAttempt.body)
+                });
+
+                if (adRes.ok) {
+                  adPatched = true;
+                  break;
+                }
+
+                const adData = await adRes.json().catch(() => ({}));
+                lastError = adData?.error?.message || `Ad start date update failed (${adRes.status}: ${adRes.statusText})`;
+              }
+
+              if (!adPatched) {
+                startDatePatchSuccess = false;
+                break;
+              }
+            }
+          }
+        } else if (changedStartDate && !creativePatchSuccess) {
+          startDatePatchSuccess = false;
+        }
+
+        if (creativePatchSuccess && endDatePatchSuccess && startDatePatchSuccess) {
           successCount++;
           results.push({ id, success: true });
 
@@ -2120,6 +2178,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               landingPageUrl: nextLandingPageUrl,
             } : {}),
             ...(changedEndDate ? { endDate: nextEndDate } : {}),
+            ...(changedStartDate ? { startDate: nextStartDate, startTime: nextStartTime } : {}),
             isDraft: false,
           } : c));
           setCreativesDrafts(prev => {
