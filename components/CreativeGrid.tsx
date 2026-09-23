@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { Ad, Creative } from '../types';
+import { Ad, Creative, Site } from '../types';
 import { CM360_ERROR_MAPPING, NAMING_TAXONOMY } from '../constants';
 import { 
   Search, 
@@ -50,11 +50,13 @@ const CreativeGrid: React.FC = () => {
     advertisers,
     fetchAllCreatives,
     copyCreative,
-    campaigns, 
+    campaigns,
     placements,
     ads,
+    sites,
     fetchCampaigns,
     fetchPlacements,
+    fetchSites,
     fetchAds,
     assignCreativeToPlacement,
     assignCreativeToAd,
@@ -86,8 +88,8 @@ const CreativeGrid: React.FC = () => {
   const [bulkEndDate, setBulkEndDate] = useState('');
   
   // Naming Convention States
-  const [namingMode, setNamingMode] = useState<'prefix' | 'suffix'>('suffix');
-  const [namingText, setNamingText] = useState('');
+  const [namingPrefix, setNamingPrefix] = useState('');
+  const [namingSuffix, setNamingSuffix] = useState('');
   const [includeDate, setIncludeDate] = useState(true);
   
   // Modals States
@@ -117,12 +119,28 @@ const CreativeGrid: React.FC = () => {
     sizeFromFile: string | null;
     mismatch: boolean;
     candidateAds: Ad[];
-    selectedAdId: string | null;
+    selectedAdIds: string[];
     assignmentReason: string;
+    manualConfirmed: boolean;
   }>>([]);
   const [manualPlanIndex, setManualPlanIndex] = useState<number | null>(null);
   const [applyManualSelectionToSameSize, setApplyManualSelectionToSameSize] = useState(true);
   const [isErrorGuideOpen, setIsErrorGuideOpen] = useState(false);
+
+  // Sites multi-select (replaces the static "Tech" naming token for Batch Upload)
+  const [selectedSiteIds, setSelectedSiteIds] = useState<Set<string> | null>(null);
+
+  // Batch Upload Report (per-file detail shown after a batch run completes)
+  type BatchReportRow = {
+    fileName: string;
+    size: string;
+    siteNames: string;
+    adName: string | null;
+    status: 'assigned' | 'uploaded_only' | 'skipped' | 'assign_failed' | 'upload_failed';
+    detail: string;
+    link: string | null;
+  };
+  const [batchReport, setBatchReport] = useState<BatchReportRow[] | null>(null);
   const [listColumnWidths, setListColumnWidths] = useState({
     preview: 110,
     name: 420,
@@ -137,6 +155,17 @@ const CreativeGrid: React.FC = () => {
     ? ads.filter((ad) => ad.campaignId === selectedCampaign.id)
     : [];
   const selectableCampaignAds = campaignAds.filter((ad) => !isDefaultAd(ad));
+
+  const campaignPlacements = selectedCampaign
+    ? placements.filter((p) => p.campaignId === selectedCampaign.id)
+    : [];
+  const campaignSites: Site[] = (() => {
+    const uniqueSiteIds = Array.from(new Set(campaignPlacements.map((p) => p.siteId).filter(Boolean)));
+    return uniqueSiteIds
+      .map((siteId) => sites.find((s) => s.id === siteId))
+      .filter((s): s is Site => !!s);
+  })();
+  const effectiveSelectedSiteIds: Set<string> = selectedSiteIds ?? new Set(campaignSites.map((s) => s.id));
 
   const startListResize = (column: keyof typeof listColumnWidths, startX: number, startWidth: number) => {
     const onMouseMove = (event: MouseEvent) => {
@@ -236,7 +265,9 @@ const CreativeGrid: React.FC = () => {
       const uniqueSizes = new Set<string>();
       ad.placementIds.forEach((placementId) => {
         const placement = placements.find((p) => p.id === placementId);
-        const size = normalizeSize(placement?.size || null);
+        if (!placement) return;
+        if (effectiveSelectedSiteIds.size > 0 && !effectiveSelectedSiteIds.has(placement.siteId)) return;
+        const size = normalizeSize(placement.size || null);
         if (size) uniqueSizes.add(size);
       });
 
@@ -248,6 +279,14 @@ const CreativeGrid: React.FC = () => {
     return map;
   };
 
+  const resolveFileSize = async (file: File): Promise<{ sizeFromName: string | null; sizeFromFile: string | null; mismatch: boolean; finalSize: string }> => {
+    const sizeFromName = normalizeSize(extractSizeFromName(file.name));
+    const sizeFromFile = normalizeSize(await getImageSize(file));
+    const mismatch = !!(sizeFromName && sizeFromFile && sizeFromName !== sizeFromFile);
+    const finalSize = sizeFromFile || sizeFromName || normalizeSize(selectedSize) || '300x250';
+    return { sizeFromName, sizeFromFile, mismatch, finalSize };
+  };
+
   const resolveBatchPlans = async (files: File[]) => {
     const adsBySize = getAdsBySize();
     const plans: Array<{
@@ -257,26 +296,28 @@ const CreativeGrid: React.FC = () => {
       sizeFromFile: string | null;
       mismatch: boolean;
       candidateAds: Ad[];
-      selectedAdId: string | null;
+      selectedAdIds: string[];
       assignmentReason: string;
+      manualConfirmed: boolean;
     }> = [];
 
     for (const file of files) {
-      const sizeFromName = normalizeSize(extractSizeFromName(file.name));
-      const sizeFromFile = normalizeSize(await getImageSize(file));
-      const mismatch = !!(sizeFromName && sizeFromFile && sizeFromName !== sizeFromFile);
-      const finalSize = sizeFromFile || sizeFromName || normalizeSize(selectedSize) || '300x250';
+      const { sizeFromName, sizeFromFile, mismatch, finalSize } = await resolveFileSize(file);
       const adsForSize = adsBySize.get(finalSize) || [];
       const selectableCandidates = adsForSize.filter((ad) => !isDefaultAd(ad));
 
-      let selectedAdId: string | null = null;
+      let selectedAdIds: string[] = [];
       let assignmentReason = 'no_match';
+      let manualConfirmed = true;
 
       if (selectableCandidates.length === 1) {
-        selectedAdId = selectableCandidates[0].id;
+        selectedAdIds = [selectableCandidates[0].id];
         assignmentReason = 'auto_single_match';
       } else if (selectableCandidates.length > 1) {
+        // Default to all matching Ads selected; the user narrows down in the review modal.
+        selectedAdIds = selectableCandidates.map((ad) => ad.id);
         assignmentReason = 'manual_required';
+        manualConfirmed = false;
       } else if (adsForSize.length > 0) {
         assignmentReason = 'default_only_unselectable';
       }
@@ -288,8 +329,9 @@ const CreativeGrid: React.FC = () => {
         sizeFromFile,
         mismatch,
         candidateAds: adsForSize,
-        selectedAdId,
+        selectedAdIds,
         assignmentReason,
+        manualConfirmed,
       });
     }
 
@@ -304,31 +346,20 @@ const CreativeGrid: React.FC = () => {
 
     setIsUploadModalOpen(false);
     setManualPlanIndex(null);
-    const campaignToken = selectedCampaign ? selectedCampaign.name.substring(0, 10) : '';
     const dateToken = includeDate ? new Date().toLocaleDateString('es-ES').replace(/\//g, '-') : '';
-    const techToken = (selectedTech || 'DV360').trim().toUpperCase();
+    const siteNamesLabel = campaignSites
+      .filter((s) => effectiveSelectedSiteIds.has(s.id))
+      .map((s) => s.name)
+      .join(', ') || 'N/A';
 
     setBatchProgress({ current: 0, total: plans.length, status: 'Starting batch upload...' });
 
-    let successCount = 0;
-    let failCount = 0;
-    let assignFailCount = 0;
-    let firstAssignError = '';
+    const reportRows: BatchReportRow[] = [];
 
     for (let i = 0; i < plans.length; i++) {
       const plan = plans[i];
       const baseName = plan.file.name.split('.')[0];
-      const nameWithConvention = namingMode === 'prefix'
-        ? joinNameTokens([namingText, baseName, dateToken])
-        : joinNameTokens([baseName, namingText, dateToken]);
-
-      const finalName = joinNameTokens([
-        campaignToken,
-        nameWithConvention,
-        techToken,
-        selectedFormat,
-        plan.finalSize.replace(/\s+/g, '_')
-      ]);
+      const finalName = joinNameTokens([namingPrefix, baseName, namingSuffix, dateToken]);
 
       setBatchProgress({
         current: i + 1,
@@ -344,59 +375,95 @@ const CreativeGrid: React.FC = () => {
       });
 
       const result = await uploadCreative(plan.file, finalName, selectedFormat, plan.finalSize);
-      if (result.success) {
-        successCount++;
+      if (!result.success) {
+        reportRows.push({
+          fileName: plan.file.name,
+          size: plan.finalSize,
+          siteNames: siteNamesLabel,
+          adName: null,
+          status: 'upload_failed',
+          detail: result.error || 'Unknown upload error',
+          link: null,
+        });
+        continue;
+      }
 
-        const adToAssign = batchAssignmentMode === 'auto'
-          ? plan.selectedAdId
-          : batchAssignmentMode === 'single'
-            ? uploadAdId
-            : null;
-        if (adToAssign && result.id) {
-          const assignResult = await assignCreativeToAd(result.id, adToAssign, selectedCampaign?.id, uploadAssignMode);
-          if (!assignResult.success) {
-            assignFailCount++;
-            if (!firstAssignError) firstAssignError = assignResult.error || 'Unknown assignment error';
-          }
-        } else if (batchAssignmentMode === 'auto') {
-          assignFailCount++;
-          if (!firstAssignError) {
-            if (plan.assignmentReason === 'default_only_unselectable') {
-              firstAssignError = `Only Default Ads matched size ${plan.finalSize} for ${plan.file.name}. Default Ads are not selectable.`;
-            } else if (plan.assignmentReason === 'no_match') {
-              firstAssignError = `No compatible Ad found for size ${plan.finalSize} (${plan.file.name})`;
-            } else {
-              firstAssignError = `Manual Ad selection missing for ${plan.file.name}`;
-            }
+      const creativeLink = result.id
+        ? `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}/advertisers/${selectedAdvertiser.id}/creatives/${result.id}`
+        : null;
+
+      const adsToAssign = batchAssignmentMode === 'auto'
+        ? plan.selectedAdIds
+        : batchAssignmentMode === 'single'
+          ? (uploadAdId ? [uploadAdId] : [])
+          : [];
+
+      if (adsToAssign.length > 0 && result.id) {
+        const assignedNames: string[] = [];
+        const failedNames: string[] = [];
+        for (const adId of adsToAssign) {
+          const targetAd = campaignAds.find((ad) => ad.id === adId);
+          const assignResult = await assignCreativeToAd(result.id, adId, selectedCampaign?.id, uploadAssignMode);
+          if (assignResult.success) {
+            assignedNames.push(targetAd?.name || adId);
+          } else {
+            failedNames.push(`${targetAd?.name || adId} (${assignResult.error || 'Unknown error'})`);
           }
         }
+        reportRows.push({
+          fileName: plan.file.name,
+          size: plan.finalSize,
+          siteNames: siteNamesLabel,
+          adName: assignedNames.join(', ') || null,
+          status: failedNames.length === 0 ? 'assigned' : 'assign_failed',
+          detail: failedNames.length === 0
+            ? `Uploaded and assigned to: ${assignedNames.join(', ')}.`
+            : `Assigned to ${assignedNames.length}/${adsToAssign.length} Ads. Failed: ${failedNames.join('; ')}`,
+          link: creativeLink,
+        });
+      } else if (batchAssignmentMode === 'none') {
+        reportRows.push({
+          fileName: plan.file.name,
+          size: plan.finalSize,
+          siteNames: siteNamesLabel,
+          adName: null,
+          status: 'uploaded_only',
+          detail: 'Uploaded without Ad assignment (Upload only mode).',
+          link: creativeLink,
+        });
+      } else if (plan.assignmentReason === 'manual_skipped') {
+        reportRows.push({
+          fileName: plan.file.name,
+          size: plan.finalSize,
+          siteNames: siteNamesLabel,
+          adName: null,
+          status: 'skipped',
+          detail: 'Ad assignment skipped by user during manual selection.',
+          link: creativeLink,
+        });
       } else {
-        failCount++;
+        const detail = plan.assignmentReason === 'default_only_unselectable'
+          ? `Only Default Ads matched size ${plan.finalSize}. Default Ads are not selectable.`
+          : plan.assignmentReason === 'no_match'
+            ? `No compatible Ad found for size ${plan.finalSize} among the selected Sites.`
+            : 'No Ad was assigned for this file.';
+        reportRows.push({
+          fileName: plan.file.name,
+          size: plan.finalSize,
+          siteNames: siteNamesLabel,
+          adName: null,
+          status: 'assign_failed',
+          detail,
+          link: creativeLink,
+        });
       }
     }
 
     setBatchProgress(null);
     setPendingFiles([]);
     setBatchPlans([]);
-
-    if (failCount === 0 && assignFailCount === 0) {
-      setToast({
-        show: true,
-        type: 'success',
-        message: 'Batch Upload Complete!',
-        details: batchAssignmentMode === 'none'
-          ? `Successfully uploaded ${successCount} creatives (no Ad assignment).`
-          : `Successfully uploaded and assigned ${successCount} creatives to CM360 Ads.`,
-        link: `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}/advertisers/${selectedAdvertiser.id}/creatives`
-      });
-    } else {
-      setToast({
-        show: true,
-        type: 'error',
-        message: 'Batch Upload Partial Failure',
-        details: `Uploaded ${successCount} successfully, ${failCount} uploads failed, ${assignFailCount} ad assignments failed.${firstAssignError ? ` First assignment error: ${firstAssignError}` : ''}`
-      });
-    }
+    setToast({ show: false, type: 'loading', message: '' });
+    setBatchReport(reportRows);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, isBatch: boolean = false) => {
@@ -406,17 +473,24 @@ const CreativeGrid: React.FC = () => {
     setBatchPlans([]);
     setManualPlanIndex(null);
     setApplyManualSelectionToSameSize(true);
+    setBatchReport(null);
 
     if (isBatch || files.length > 1) {
       setPendingFiles(files);
       setCustomName('Batch_Upload');
       setSelectedFormat('Display');
       setSelectedSize(CREATIVE_SPECS['Display'][0]);
-      setSelectedTech((NAMING_TAXONOMY.Tech[0] || 'dv360').toUpperCase());
+      setNamingPrefix('');
+      setNamingSuffix('');
+      setSelectedSiteIds(null);
       setUploadAdId('');
       setUploadAssignMode('add');
       setBatchAssignmentMode('auto');
       setIsUploadModalOpen(true);
+      if (selectedCampaign) {
+        fetchPlacements(selectedCampaign.id);
+        fetchSites();
+      }
     } else {
       const file = files[0];
       setPendingFile(file);
@@ -509,7 +583,7 @@ const CreativeGrid: React.FC = () => {
       if (batchAssignmentMode === 'auto') {
         const plans = await resolveBatchPlans(pendingFiles);
         setBatchPlans(plans);
-        const firstManualIndex = plans.findIndex((plan) => plan.candidateAds.filter((ad) => !isDefaultAd(ad)).length > 1 && !plan.selectedAdId);
+        const firstManualIndex = plans.findIndex((plan) => !plan.manualConfirmed);
 
         if (firstManualIndex >= 0) {
           setManualPlanIndex(firstManualIndex);
@@ -518,27 +592,35 @@ const CreativeGrid: React.FC = () => {
 
         await startBatchUpload(plans);
       } else if (batchAssignmentMode === 'single') {
-        const plans = pendingFiles.map((file) => ({
-          file,
-          finalSize: normalizeSize(selectedSize) || '300x250',
-          sizeFromName: normalizeSize(extractSizeFromName(file.name)),
-          sizeFromFile: null,
-          mismatch: false,
-          candidateAds: [],
-          selectedAdId: uploadAdId || null,
-          assignmentReason: uploadAdId ? 'manual_selected_ad' : 'no_assignment',
+        const plans = await Promise.all(pendingFiles.map(async (file) => {
+          const { sizeFromName, sizeFromFile, mismatch, finalSize } = await resolveFileSize(file);
+          return {
+            file,
+            finalSize,
+            sizeFromName,
+            sizeFromFile,
+            mismatch,
+            candidateAds: [],
+            selectedAdIds: uploadAdId ? [uploadAdId] : [],
+            assignmentReason: uploadAdId ? 'manual_selected_ad' : 'no_assignment',
+            manualConfirmed: true,
+          };
         }));
         await startBatchUpload(plans);
       } else {
-        const plans = pendingFiles.map((file) => ({
-          file,
-          finalSize: normalizeSize(selectedSize) || '300x250',
-          sizeFromName: normalizeSize(extractSizeFromName(file.name)),
-          sizeFromFile: null,
-          mismatch: false,
-          candidateAds: [],
-          selectedAdId: null,
-          assignmentReason: 'no_assignment',
+        const plans = await Promise.all(pendingFiles.map(async (file) => {
+          const { sizeFromName, sizeFromFile, mismatch, finalSize } = await resolveFileSize(file);
+          return {
+            file,
+            finalSize,
+            sizeFromName,
+            sizeFromFile,
+            mismatch,
+            candidateAds: [],
+            selectedAdIds: [],
+            assignmentReason: 'no_assignment',
+            manualConfirmed: true,
+          };
         }));
         await startBatchUpload(plans);
       }
@@ -603,62 +685,72 @@ const CreativeGrid: React.FC = () => {
     }
   };
 
-  const handleManualAdSelection = (adId: string) => {
+  const handleToggleManualAd = (adId: string) => {
+    if (manualPlanIndex === null) return;
+    setBatchPlans((prev) => prev.map((plan, idx) => {
+      if (idx !== manualPlanIndex) return plan;
+      const isSelected = plan.selectedAdIds.includes(adId);
+      return {
+        ...plan,
+        selectedAdIds: isSelected
+          ? plan.selectedAdIds.filter((id) => id !== adId)
+          : [...plan.selectedAdIds, adId],
+      };
+    }));
+  };
+
+  const advanceManualFlow = (updatedPlans: typeof batchPlans) => {
+    const nextManual = updatedPlans.findIndex((plan) => !plan.manualConfirmed);
+    if (nextManual >= 0) {
+      setManualPlanIndex(nextManual);
+      return;
+    }
+    setManualPlanIndex(null);
+    startBatchUpload(updatedPlans);
+  };
+
+  const handleManualConfirm = () => {
     if (manualPlanIndex === null) return;
 
     const currentPlan = batchPlans[manualPlanIndex];
+    const confirmedAdIds = currentPlan.selectedAdIds;
+
     const updatedPlans = batchPlans.map((plan, idx) => {
       const shouldApplyToCurrent = idx === manualPlanIndex;
       const shouldApplyToSameSize = applyManualSelectionToSameSize
         && idx > manualPlanIndex
-        && plan.finalSize === currentPlan.finalSize
-        && plan.candidateAds.some((ad) => ad.id === adId)
-        && !plan.selectedAdId;
+        && !plan.manualConfirmed
+        && plan.finalSize === currentPlan.finalSize;
 
       if (!shouldApplyToCurrent && !shouldApplyToSameSize) return plan;
 
       return {
         ...plan,
-        selectedAdId: adId,
-        assignmentReason: shouldApplyToCurrent ? 'manual_selected_match' : 'manual_selected_match_by_size',
+        selectedAdIds: shouldApplyToCurrent
+          ? confirmedAdIds
+          : confirmedAdIds.filter((adId) => plan.candidateAds.some((ad) => ad.id === adId)),
+        assignmentReason: confirmedAdIds.length === 0
+          ? 'manual_skipped'
+          : (shouldApplyToCurrent ? 'manual_selected_match' : 'manual_selected_match_by_size'),
+        manualConfirmed: true,
       };
     });
 
     setBatchPlans(updatedPlans);
-
-    const nextManual = updatedPlans.findIndex((plan, idx) => idx > manualPlanIndex && plan.candidateAds.filter((ad) => !isDefaultAd(ad)).length > 1 && !plan.selectedAdId);
-    if (nextManual >= 0) {
-      setManualPlanIndex(nextManual);
-      return;
-    }
-
-    setManualPlanIndex(null);
-    startBatchUpload(updatedPlans);
+    advanceManualFlow(updatedPlans);
   };
 
   const handleManualSkipFile = () => {
     if (manualPlanIndex === null) return;
 
-    setBatchPlans((prev) => prev.map((plan, idx) => (
-      idx === manualPlanIndex
-        ? { ...plan, selectedAdId: null, assignmentReason: 'manual_skipped' }
-        : plan
-    )));
-
     const updatedPlans = batchPlans.map((plan, idx) => (
       idx === manualPlanIndex
-        ? { ...plan, selectedAdId: null, assignmentReason: 'manual_skipped' }
+        ? { ...plan, selectedAdIds: [], assignmentReason: 'manual_skipped', manualConfirmed: true }
         : plan
     ));
 
-    const nextManual = updatedPlans.findIndex((plan, idx) => idx > manualPlanIndex && plan.candidateAds.filter((ad) => !isDefaultAd(ad)).length > 1 && !plan.selectedAdId);
-    if (nextManual >= 0) {
-      setManualPlanIndex(nextManual);
-      return;
-    }
-
-    setManualPlanIndex(null);
-    startBatchUpload(updatedPlans);
+    setBatchPlans(updatedPlans);
+    advanceManualFlow(updatedPlans);
   };
 
   const handleCopy = (text: string, id: string) => {
@@ -1755,7 +1847,12 @@ const CreativeGrid: React.FC = () => {
                       onChange={(e) => {
                         const campaign = campaigns.find((item) => item.id === e.target.value) || null;
                         setSelectedCampaign(campaign);
-                        if (campaign) fetchAds(campaign.id);
+                        setSelectedSiteIds(null);
+                        if (campaign) {
+                          fetchAds(campaign.id);
+                          fetchPlacements(campaign.id);
+                          fetchSites();
+                        }
                       }}
                       disabled={!selectedAdvertiser}
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
@@ -1773,33 +1870,32 @@ const CreativeGrid: React.FC = () => {
 
               {pendingFiles.length > 0 && (
                 <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[10px] uppercase font-bold text-slate-500">Naming Convention</label>
-                    <div className="flex bg-slate-900 rounded-lg p-0.5 border border-slate-800">
-                      <button 
-                        onClick={() => setNamingMode('prefix')}
-                        className={`px-3 py-1 text-[9px] font-bold rounded-md transition-all ${namingMode === 'prefix' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}
-                      >
-                        Prefix
-                      </button>
-                      <button 
-                        onClick={() => setNamingMode('suffix')}
-                        className={`px-3 py-1 text-[9px] font-bold rounded-md transition-all ${namingMode === 'suffix' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}
-                      >
-                        Suffix
-                      </button>
-                    </div>
-                  </div>
-                  
+                  <label className="text-[10px] uppercase font-bold text-slate-500">Naming Convention</label>
+
                   <div className="space-y-3">
-                    <input 
-                      type="text"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-blue-500 transition-all"
-                      value={namingText}
-                      onChange={(e) => setNamingText(e.target.value)}
-                      placeholder={namingMode === 'prefix' ? "Prefix text..." : "Suffix text..."}
-                    />
-                    
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[9px] uppercase font-bold text-slate-600 mb-1">Prefix</label>
+                        <input
+                          type="text"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-blue-500 transition-all"
+                          value={namingPrefix}
+                          onChange={(e) => setNamingPrefix(e.target.value)}
+                          placeholder="Prefix text..."
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] uppercase font-bold text-slate-600 mb-1">Suffix</label>
+                        <input
+                          type="text"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-blue-500 transition-all"
+                          value={namingSuffix}
+                          onChange={(e) => setNamingSuffix(e.target.value)}
+                          placeholder="Suffix text..."
+                        />
+                      </div>
+                    </div>
+
                     <label className="flex items-center gap-3 cursor-pointer group">
                       <div className={`w-8 h-4 rounded-full transition-all relative ${includeDate ? 'bg-blue-600' : 'bg-slate-800'}`}>
                         <div className={`absolute top-1 w-2 h-2 bg-white rounded-full transition-all ${includeDate ? 'left-5' : 'left-1'}`} />
@@ -1836,19 +1932,79 @@ const CreativeGrid: React.FC = () => {
                 </div>
               )}
 
-              <div>
-                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Tech</label>
-                <select
-                  value={selectedTech}
-                  onChange={(e) => setSelectedTech(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
-                >
-                  {TECH_OPTIONS.map((tech) => (
-                    <option key={tech} value={tech}>{tech}</option>
-                  ))}
-                </select>
-                <p className="text-[10px] text-slate-500 mt-2">This token is inserted before Format in creative naming.</p>
-              </div>
+              {pendingFiles.length === 0 && (
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Tech</label>
+                  <select
+                    value={selectedTech}
+                    onChange={(e) => setSelectedTech(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+                  >
+                    {TECH_OPTIONS.map((tech) => (
+                      <option key={tech} value={tech}>{tech}</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-500 mt-2">This token is inserted before Format in creative naming.</p>
+                </div>
+              )}
+
+              {pendingFiles.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-[10px] uppercase font-bold text-slate-500">Sites</label>
+                    {campaignSites.length > 0 && (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSiteIds(new Set(campaignSites.map((s) => s.id)))}
+                          className="text-[9px] font-bold text-blue-400 hover:text-blue-300"
+                        >
+                          Select all
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSiteIds(new Set())}
+                          className="text-[9px] font-bold text-slate-500 hover:text-slate-400"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {!selectedCampaign && (
+                    <p className="text-[10px] text-slate-500">Select a campaign first to load its Sites from CM360.</p>
+                  )}
+                  {selectedCampaign && campaignSites.length === 0 && (
+                    <p className="text-[10px] text-slate-500">No Sites found for this campaign's Placements yet. They will appear once Placements load.</p>
+                  )}
+                  {campaignSites.length > 0 && (
+                    <div className="grid grid-cols-1 gap-1.5 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                      {campaignSites.map((site) => {
+                        const checked = effectiveSelectedSiteIds.has(site.id);
+                        return (
+                          <label
+                            key={site.id}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-all ${checked ? 'border-blue-500/50 bg-blue-600/10 text-slate-200' : 'border-slate-800 bg-slate-950 text-slate-500'}`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="accent-blue-500"
+                              checked={checked}
+                              onChange={(e) => {
+                                const next = new Set(effectiveSelectedSiteIds);
+                                if (e.target.checked) next.add(site.id); else next.delete(site.id);
+                                setSelectedSiteIds(next);
+                              }}
+                            />
+                            <span className="truncate">{site.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-slate-500 mt-2">Selected Sites are used in the file name and filter which Ads are eligible for auto-assignment. All Sites for this campaign are selected by default.</p>
+                </div>
+              )}
 
               <div>
                 <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Format</label>
@@ -1998,9 +2154,9 @@ const CreativeGrid: React.FC = () => {
       {manualPlanIndex !== null && batchPlans[manualPlanIndex] && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-lg shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <h3 className="text-xl font-bold text-white mb-2">Select Ad for file</h3>
+            <h3 className="text-xl font-bold text-white mb-2">Review Ads for file</h3>
             <p className="text-slate-400 text-sm mb-5">
-              Multiple Ads were found for size <span className="text-blue-400 font-bold">{batchPlans[manualPlanIndex].finalSize}</span>. Choose one for this file.
+              {batchPlans[manualPlanIndex].candidateAds.filter((ad) => !isDefaultAd(ad)).length} Ads were found for size <span className="text-blue-400 font-bold">{batchPlans[manualPlanIndex].finalSize}</span>. All are selected by default — uncheck any that shouldn't receive this creative.
             </p>
 
             <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 mb-4">
@@ -2014,23 +2170,35 @@ const CreativeGrid: React.FC = () => {
             </div>
 
             <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
-              {batchPlans[manualPlanIndex].candidateAds.map((ad) => (
-                <button
-                  key={ad.id}
-                  onClick={() => !isDefaultAd(ad) && handleManualAdSelection(ad.id)}
-                  disabled={isDefaultAd(ad)}
-                  className={`w-full text-left p-3 rounded-xl border transition-all ${
-                    isDefaultAd(ad)
-                      ? 'border-slate-700 bg-slate-900/60 text-slate-500 cursor-not-allowed'
-                      : 'border-slate-800 bg-slate-950 hover:border-blue-500/50 hover:bg-blue-600/10'
-                  }`}
-                >
-                  <p className={`text-sm font-semibold truncate ${isDefaultAd(ad) ? 'text-slate-500' : 'text-slate-200'}`}>
-                    {isDefaultAd(ad) ? `[DEFAULT - LOCKED] ${ad.name}` : ad.name}
-                  </p>
-                  <p className="text-[10px] text-slate-500 mt-1 font-mono">Ad ID: {ad.id}</p>
-                </button>
-              ))}
+              {batchPlans[manualPlanIndex].candidateAds.map((ad) => {
+                const checked = batchPlans[manualPlanIndex].selectedAdIds.includes(ad.id);
+                return (
+                  <label
+                    key={ad.id}
+                    className={`flex items-center gap-3 w-full text-left p-3 rounded-xl border transition-all ${
+                      isDefaultAd(ad)
+                        ? 'border-slate-700 bg-slate-900/60 text-slate-500 cursor-not-allowed'
+                        : checked
+                          ? 'border-blue-500/50 bg-blue-600/10 cursor-pointer'
+                          : 'border-slate-800 bg-slate-950 hover:border-blue-500/50 hover:bg-blue-600/10 cursor-pointer'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="accent-blue-500"
+                      checked={checked}
+                      disabled={isDefaultAd(ad)}
+                      onChange={() => handleToggleManualAd(ad.id)}
+                    />
+                    <div className="min-w-0">
+                      <p className={`text-sm font-semibold truncate ${isDefaultAd(ad) ? 'text-slate-500' : 'text-slate-200'}`}>
+                        {isDefaultAd(ad) ? `[DEFAULT - LOCKED] ${ad.name}` : ad.name}
+                      </p>
+                      <p className="text-[10px] text-slate-500 mt-1 font-mono">Ad ID: {ad.id}</p>
+                    </div>
+                  </label>
+                );
+              })}
             </div>
 
             <label className="mt-4 flex items-center gap-2 text-[11px] text-slate-300">
@@ -2040,7 +2208,7 @@ const CreativeGrid: React.FC = () => {
                 onChange={(e) => setApplyManualSelectionToSameSize(e.target.checked)}
                 className="accent-blue-500"
               />
-              Apply this Ad to remaining files with the same size ({batchPlans[manualPlanIndex].finalSize})
+              Apply this selection to remaining files with the same size ({batchPlans[manualPlanIndex].finalSize})
             </label>
 
             <div className="flex gap-3 pt-6">
@@ -2049,6 +2217,76 @@ const CreativeGrid: React.FC = () => {
                 className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
               >
                 Skip this file
+              </button>
+              <button
+                onClick={handleManualConfirm}
+                className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all"
+              >
+                Confirm ({batchPlans[manualPlanIndex].selectedAdIds.length} selected)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {batchReport !== null && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-3xl max-h-[calc(100vh-2rem)] overflow-y-auto custom-scrollbar shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xl font-bold text-white">Batch Upload Report</h3>
+              <button
+                onClick={() => setBatchReport(null)}
+                className="text-slate-500 hover:text-white"
+              >
+                <XIcon size={18} />
+              </button>
+            </div>
+            <p className="text-slate-400 text-sm mb-5">
+              {batchReport.filter((r) => r.status === 'assigned' || r.status === 'uploaded_only').length} of {batchReport.length} files completed without issues.
+              {batchReport.some((r) => r.status === 'skipped') && ' Some files were skipped by you during manual Ad selection.'}
+              {batchReport.some((r) => r.status === 'assign_failed' || r.status === 'upload_failed') && ' Some files need attention — see details below.'}
+            </p>
+
+            <div className="space-y-2">
+              {batchReport.map((row, idx) => {
+                const statusStyles: Record<BatchReportRow['status'], { label: string; className: string }> = {
+                  assigned: { label: 'Uploaded & Assigned', className: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10' },
+                  uploaded_only: { label: 'Uploaded (no assignment)', className: 'text-blue-400 border-blue-500/40 bg-blue-500/10' },
+                  skipped: { label: 'Assignment Skipped', className: 'text-amber-400 border-amber-500/40 bg-amber-500/10' },
+                  assign_failed: { label: 'Assignment Failed', className: 'text-rose-400 border-rose-500/40 bg-rose-500/10' },
+                  upload_failed: { label: 'Upload Failed', className: 'text-rose-400 border-rose-500/40 bg-rose-500/10' },
+                };
+                const style = statusStyles[row.status];
+                return (
+                  <div key={idx} className="p-3 bg-slate-950 rounded-xl border border-slate-800">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <p className="text-xs font-semibold text-slate-200 truncate">{row.fileName}</p>
+                      <span className={`text-[9px] font-bold uppercase px-2 py-1 rounded-full border ${style.className}`}>{style.label}</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Size: <span className="text-slate-300 font-mono">{row.size}</span>
+                      {' · '}Sites: <span className="text-slate-300">{row.siteNames}</span>
+                      {row.adName && (
+                        <>{' · '}Ad: <span className="text-slate-300">{row.adName}</span></>
+                      )}
+                    </p>
+                    <p className="text-[10px] text-slate-500 mt-1">{row.detail}</p>
+                    {row.link && (
+                      <a href={row.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 mt-1">
+                        View in CM360 <ExternalLink size={10} />
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex gap-3 pt-6">
+              <button
+                onClick={() => setBatchReport(null)}
+                className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all"
+              >
+                Close
               </button>
             </div>
           </div>
