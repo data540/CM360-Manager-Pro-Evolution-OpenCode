@@ -586,11 +586,11 @@ const CreativeBulkEditPanel: React.FC<CreativeBulkEditPanelProps> = ({ onClose, 
                       <select
                         value={landingPageId}
                         onChange={(e) => setLandingPageId(e.target.value)}
-                        className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
                       >
                         <option value="">Select landing page...</option>
                         {landingPages.map((lp) => (
-                          <option key={lp.id} value={lp.id}>{lp.name}</option>
+                          <option key={lp.id} value={lp.id}>{lp.url || lp.name}</option>
                         ))}
                       </select>
                     ) : (

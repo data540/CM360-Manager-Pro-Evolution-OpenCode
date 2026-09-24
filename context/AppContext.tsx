@@ -490,7 +490,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const sizeStr = c.size ? `${c.size.width}x${c.size.height}` : '300x250';
     const [width, height] = sizeStr.includes('x') ? sizeStr.split('x').map(Number) : [300, 250];
     const firstClickTag = Array.isArray(c.clickTags) && c.clickTags.length > 0 ? c.clickTags[0] : null;
-    const landingPageId = c.defaultLandingPageId || c.landingPageId || firstClickTag?.advertiserLandingPageId || undefined;
+    const landingPageId = c.defaultLandingPageId || c.landingPageId || firstClickTag?.clickThroughUrl?.landingPageId || undefined;
     const landingPageUrl = firstClickTag?.clickThroughUrl?.computedClickThroughUrl || firstClickTag?.clickThroughUrl?.customClickThroughUrl || firstClickTag?.clickThroughUrl?.defaultLandingPage || undefined;
 
     const simulatedThumb = `https://picsum.photos/seed/${c.id}/${width || 300}/${height || 250}`;
@@ -2035,8 +2035,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       try {
         const nextName = typeof draft.name === 'string' ? draft.name : creative.name;
         const nextActive = typeof draft.active === 'boolean' ? draft.active : creative.active;
-        const nextLandingPageId = typeof draft.landingPageId === 'string' ? draft.landingPageId : creative.landingPageId;
-        const nextLandingPageUrl = typeof draft.landingPageUrl === 'string' ? draft.landingPageUrl : creative.landingPageUrl;
+        const hasDraftLandingPageId = Object.prototype.hasOwnProperty.call(draft, 'landingPageId');
+        const hasDraftLandingPageUrl = Object.prototype.hasOwnProperty.call(draft, 'landingPageUrl');
+        const nextLandingPageId = hasDraftLandingPageId ? draft.landingPageId : creative.landingPageId;
+        const nextLandingPageUrl = hasDraftLandingPageUrl ? draft.landingPageUrl : creative.landingPageUrl;
         const nextEndDate = typeof draft.endDate === 'string' ? draft.endDate : creative.endDate;
         const nextStartDate = typeof draft.startDate === 'string' ? draft.startDate : creative.startDate;
         const nextStartTime = typeof draft.startTime === 'string' ? draft.startTime : (creative.startTime || '00:00');
@@ -2076,38 +2078,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           baseMask.push('active');
         }
 
-        if (changedLanding) {
-          if (nextLandingPageUrl) {
-            attempts.push({
-              url: `/api/cm360/userprofiles/${profileId}/creatives/${id}?updateMask=${encodeURIComponent([...baseMask, 'clickTags'].join(','))}`,
-              body: {
-                ...baseBody,
-                clickTags: [{
-                  eventName: 'EXIT',
-                  clickThroughUrl: {
-                    customClickThroughUrl: nextLandingPageUrl,
-                  },
-                }],
-              }
-            });
-          }
-
-          if (nextLandingPageId) {
-            attempts.push({
-              url: `/api/cm360/userprofiles/${profileId}/creatives/${id}?updateMask=${encodeURIComponent([...baseMask, 'clickTags'].join(','))}`,
-              body: {
-                ...baseBody,
-                clickTags: [{
-                  eventName: 'EXIT',
-                  clickThroughUrl: {
-                    advertiserLandingPageId: nextLandingPageId,
-                  },
-                }],
-              }
-            });
-          }
-        }
-
         if (baseMask.length > 0) {
           attempts.push({
             url: `/api/cm360/userprofiles/${profileId}/creatives/${id}?updateMask=${encodeURIComponent(baseMask.join(','))}`,
@@ -2115,22 +2085,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           });
         }
 
-        attempts.push({
-          url: `/api/cm360/userprofiles/${profileId}/creatives?id=${encodeURIComponent(id)}`,
-          body: {
-            ...baseBody,
-            ...(changedLanding && nextLandingPageUrl ? {
-              clickTags: [{
-                eventName: 'EXIT',
-                clickThroughUrl: {
-                  customClickThroughUrl: nextLandingPageUrl,
-                },
-              }],
-            } : {}),
-          }
-        });
-
-        let creativePatchSuccess = !changedName && !changedActive && !changedLanding;
+        let creativePatchSuccess = !changedName && !changedActive;
+        let landingPatchSuccess = !changedLanding;
         let endDatePatchSuccess = !changedEndDate;
         let startDatePatchSuccess = !changedStartDate;
         let lastError = '';
@@ -2153,6 +2109,80 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
             const data = await res.json().catch(() => ({}));
             lastError = data?.error?.message || `Creative update failed (${res.status}: ${res.statusText})`;
+          }
+        }
+
+        if (changedLanding) {
+          const clickThroughUrl = nextLandingPageId
+            ? { defaultLandingPage: false, landingPageId: nextLandingPageId }
+            : nextLandingPageUrl
+              ? { defaultLandingPage: false, customClickThroughUrl: nextLandingPageUrl }
+              : null;
+
+          if (!clickThroughUrl) {
+            landingPatchSuccess = false;
+            lastError = 'No landing page or custom URL was provided.';
+          } else {
+            const linkedAds: any[] = [];
+            let pageToken: string | undefined;
+
+            do {
+              const params = new URLSearchParams({ creativeIds: id, maxResults: '100' });
+              if (pageToken) params.set('pageToken', pageToken);
+              const adsRes = await fetch(`/api/cm360/userprofiles/${profileId}/ads?${params.toString()}`, {
+                headers: { Authorization: `Bearer ${accessToken}` }
+              });
+              const adsData = await adsRes.json().catch(() => ({}));
+              if (!adsRes.ok) {
+                lastError = adsData?.error?.message || `Could not load Ads for creative ${id}.`;
+                linkedAds.length = 0;
+                break;
+              }
+              linkedAds.push(...(adsData.ads || []));
+              pageToken = adsData.nextPageToken;
+            } while (pageToken);
+
+            if (linkedAds.length === 0) {
+              landingPatchSuccess = false;
+              if (!lastError) lastError = 'No Ads are linked to this creative. Landing pages are applied to Creative assignments in CM360.';
+            } else {
+              landingPatchSuccess = true;
+
+              for (const linkedAd of linkedAds) {
+                const rotation = linkedAd.creativeRotation;
+                const assignments = Array.isArray(rotation?.creativeAssignments) ? rotation.creativeAssignments : [];
+                let matchedAssignment = false;
+                const updatedAssignments = assignments.map((assignment: any) => {
+                  if (String(assignment.creativeId) !== String(id)) return assignment;
+                  matchedAssignment = true;
+                  return { ...assignment, clickThroughUrl };
+                });
+
+                if (!matchedAssignment) continue;
+
+                const adRes = await fetch(
+                  `/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(linkedAd.id)}`,
+                  {
+                    method: 'PATCH',
+                    headers: {
+                      Authorization: `Bearer ${accessToken}`,
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                      id: linkedAd.id,
+                      creativeRotation: { ...rotation, creativeAssignments: updatedAssignments }
+                    })
+                  }
+                );
+
+                if (!adRes.ok) {
+                  const adData = await adRes.json().catch(() => ({}));
+                  landingPatchSuccess = false;
+                  lastError = adData?.error?.message || `Landing page update failed for Ad ${linkedAd.id} (${adRes.status}: ${adRes.statusText})`;
+                  break;
+                }
+              }
+            }
           }
         }
 
@@ -2258,7 +2288,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           startDatePatchSuccess = false;
         }
 
-        if (creativePatchSuccess && endDatePatchSuccess && startDatePatchSuccess) {
+        if (creativePatchSuccess && landingPatchSuccess && endDatePatchSuccess && startDatePatchSuccess) {
           successCount++;
           results.push({ id, success: true });
 
@@ -2281,10 +2311,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           });
         } else {
           failedCount++;
-          const unsupportedHint = changedLanding
-            ? ' Some creative types do not support click-through landing updates via this endpoint.'
-            : '';
-          results.push({ id, success: false, error: `${lastError || 'Unknown error'}${unsupportedHint}` });
+          results.push({ id, success: false, error: lastError || 'Unknown error' });
         }
       } catch (e: any) {
         failedCount++;
