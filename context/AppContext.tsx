@@ -86,7 +86,7 @@ interface AppContextType {
   assignCreativeToPlacement: (creativeId: string, placementId: string, campaignId: string) => Promise<{success: boolean, id?: string, error?: string}>;
   createAd: (params: { campaignId: string; placementId: string; name: string; creativeId?: string }) => Promise<{success: boolean, id?: string, error?: string}>;
   assignCreativeToAd: (creativeId: string, adId: string, campaignId?: string, mode?: 'add' | 'replace') => Promise<{success: boolean, id?: string, error?: string}>;
-  unassignCreativeFromAd: (creativeId: string, adId: string, campaignId?: string) => Promise<{success: boolean, error?: string}>;
+  unassignCreativeFromAd: (creativeId: string, adId: string, campaignId?: string, refreshAds?: boolean) => Promise<{success: boolean, error?: string}>;
   isAdsLoading: boolean;
 }
 
@@ -1794,14 +1794,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  const unassignCreativeFromAd = async (creativeId: string, adId: string, campaignId?: string) => {
+  const unassignCreativeFromAd = async (creativeId: string, adId: string, campaignId?: string, refreshAds = true) => {
     if (!accessToken || !profileId) return { success: false, error: 'No connection' };
     try {
-      const effectiveCampaignId = campaignId || selectedCampaign?.id;
-      if (!effectiveCampaignId) {
-        return { success: false, error: 'Select a campaign before unassigning creative from an Ad.' };
-      }
-
       const adRes = await fetch(`/api/cm360/userprofiles/${profileId}/ads/${adId}`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
@@ -1809,6 +1804,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (!adRes.ok) {
         return { success: false, error: adData.error?.message || `Could not load Ad ${adId}` };
       }
+      const effectiveCampaignId = campaignId || adData.campaignId || selectedCampaign?.id;
 
       const currentAssignments = Array.isArray(adData?.creativeRotation?.creativeAssignments)
         ? adData.creativeRotation.creativeAssignments
@@ -1847,7 +1843,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return { success: false, error: data?.error?.message || `Unassign failed (${res.status})` };
       }
 
-      await fetchAds(effectiveCampaignId);
+      setAds((prev) => prev.map((ad) => ad.id === adId
+        ? { ...ad, creativeIds: ad.creativeIds.filter((id) => String(id) !== String(creativeId)) }
+        : ad));
+      if (refreshAds && effectiveCampaignId) await fetchAds(effectiveCampaignId);
       return { success: true };
     } catch (e: any) {
       console.error('Unassign creative from ad error:', e);

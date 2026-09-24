@@ -25,7 +25,8 @@ import {
   LayoutDashboard,
   SearchCode,
   UploadCloud,
-  Loader2
+  Loader2,
+  Unlink
 } from 'lucide-react';
 import Toast from './Toast';
 import CreativeBulkEditPanel from './CreativeBulkEditPanel';
@@ -59,6 +60,7 @@ const CreativeGrid: React.FC = () => {
     fetchCreativesByIds,
     assignCreativeToPlacement,
     assignCreativeToAd,
+    unassignCreativeFromAd,
     creativesDrafts,
     fetchLandingPages
   } = useApp();
@@ -99,6 +101,9 @@ const CreativeGrid: React.FC = () => {
   const [placementFilterSearch, setPlacementFilterSearch] = useState('');
   const [isLoadingPlacementCreatives, setIsLoadingPlacementCreatives] = useState(false);
   const [selectedCreativeIds, setSelectedCreativeIds] = useState<Set<string>>(new Set());
+  const [assignmentAdIdsByCreative, setAssignmentAdIdsByCreative] = useState<Record<string, string[]>>({});
+  const [isLoadingAssignments, setIsLoadingAssignments] = useState(false);
+  const [isUnassigningCreatives, setIsUnassigningCreatives] = useState(false);
 
   // Naming Convention States
   const [namingPrefix, setNamingPrefix] = useState('');
@@ -161,6 +166,7 @@ const CreativeGrid: React.FC = () => {
     type: 180,
     size: 170,
     status: 150,
+    assignment: 170,
   });
 
   const isDefaultAd = (ad: Ad) => /default/i.test(ad.name || '');
@@ -971,6 +977,72 @@ const CreativeGrid: React.FC = () => {
     return Array.from(byId.values());
   }, [creatives, filterLoadedCreatives]);
 
+  const assignmentCreativeIdsKey = React.useMemo(
+    () => creativesForDisplay.map((creative) => String(creative.id)).sort().join(','),
+    [creativesForDisplay]
+  );
+
+  useEffect(() => {
+    if (!accessToken || !profileId || !assignmentCreativeIdsKey) {
+      setAssignmentAdIdsByCreative({});
+      setIsLoadingAssignments(false);
+      return;
+    }
+
+    let cancelled = false;
+    const creativeIds = assignmentCreativeIdsKey.split(',');
+
+    const loadAssignmentStatuses = async () => {
+      setIsLoadingAssignments(true);
+      const nextAssignments: Record<string, string[]> = Object.fromEntries(creativeIds.map((id) => [id, []]));
+
+      try {
+        for (let offset = 0; offset < creativeIds.length; offset += 25) {
+          const batchIds = creativeIds.slice(offset, offset + 25);
+          let pageToken: string | undefined;
+
+          do {
+            const params = new URLSearchParams({ maxResults: '1000' });
+            batchIds.forEach((id) => params.append('creativeIds', id));
+            if (pageToken) params.set('pageToken', pageToken);
+
+            const response = await fetch(`/api/cm360/userprofiles/${profileId}/ads?${params.toString()}`, {
+              headers: { Authorization: `Bearer ${accessToken}` }
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data?.error?.message || `Could not load creative assignments (${response.status})`);
+
+            (data.ads || []).forEach((ad: any) => {
+              const assignments = ad.creativeRotation?.creativeAssignments || ad.creativeAssignments || [];
+              assignments.forEach((assignment: any) => {
+                const creativeId = String(assignment.creativeId || '');
+                if (!(creativeId in nextAssignments)) return;
+                if (!nextAssignments[creativeId].includes(String(ad.id))) nextAssignments[creativeId].push(String(ad.id));
+              });
+            });
+            pageToken = data.nextPageToken;
+          } while (pageToken);
+        }
+
+        if (!cancelled) setAssignmentAdIdsByCreative(nextAssignments);
+      } catch (error) {
+        console.error('Load creative assignment statuses error:', error);
+        if (!cancelled) {
+          ads.forEach((ad) => ad.creativeIds.forEach((creativeId) => {
+            const id = String(creativeId);
+            if (id in nextAssignments && !nextAssignments[id].includes(ad.id)) nextAssignments[id].push(ad.id);
+          }));
+          setAssignmentAdIdsByCreative(nextAssignments);
+        }
+      } finally {
+        if (!cancelled) setIsLoadingAssignments(false);
+      }
+    };
+
+    loadAssignmentStatuses();
+    return () => { cancelled = true; };
+  }, [accessToken, profileId, assignmentCreativeIdsKey]);
+
   const displayCreatives = creativesForDisplay.map((c) => ({
     ...c,
     ...(creativesDrafts[c.id] || {}),
@@ -1165,6 +1237,56 @@ const CreativeGrid: React.FC = () => {
     });
   };
 
+  const handleUnassignSelectedCreatives = async () => {
+    const creativeIds = Array.from(selectedCreativeIds).filter((id) => (assignmentAdIdsByCreative[id] || []).length > 0);
+    if (creativeIds.length === 0 || isUnassigningCreatives) return;
+    const assignmentCount = creativeIds.reduce((total, id) => total + assignmentAdIdsByCreative[id].length, 0);
+    if (!window.confirm(`Unassign ${creativeIds.length} creative(s) from ${assignmentCount} Ad assignment(s)?`)) return;
+
+    setIsUnassigningCreatives(true);
+    setToast({ show: true, type: 'loading', message: `Unassigning ${creativeIds.length} creative(s)...` });
+
+    const nextAssignments = Object.fromEntries(
+      Object.entries(assignmentAdIdsByCreative).map(([id, adIds]) => [id, [...adIds]])
+    );
+    const failedCreativeIds = new Set<string>();
+    let removedAssignments = 0;
+    let lastError = '';
+
+    for (const creativeId of creativeIds) {
+      for (const adId of [...(nextAssignments[creativeId] || [])]) {
+        const result = await unassignCreativeFromAd(creativeId, adId, undefined, false);
+        if (result.success) {
+          nextAssignments[creativeId] = nextAssignments[creativeId].filter((id) => id !== adId);
+          removedAssignments++;
+        } else {
+          failedCreativeIds.add(creativeId);
+          lastError = result.error || 'CM360 rejected an unassignment.';
+        }
+      }
+    }
+
+    setAssignmentAdIdsByCreative(nextAssignments);
+    setSelectedCreativeIds(failedCreativeIds);
+    setIsUnassigningCreatives(false);
+
+    if (failedCreativeIds.size === 0) {
+      setToast({
+        show: true,
+        type: 'success',
+        message: `${creativeIds.length} creative(s) unassigned`,
+        details: `${removedAssignments} Ad assignment(s) removed from CM360.`
+      });
+    } else {
+      setToast({
+        show: true,
+        type: 'error',
+        message: `Unassigned with ${failedCreativeIds.size} failure(s)`,
+        details: lastError
+      });
+    }
+  };
+
   const getIcon = (type: string) => {
     if (type.includes('HTML5') || type.includes('RICH_MEDIA')) return <FileCode className="w-5 h-5 text-amber-500" />;
     if (type.includes('VIDEO')) return <Video className="w-5 h-5 text-rose-500" />;
@@ -1212,6 +1334,8 @@ const CreativeGrid: React.FC = () => {
   const visibleFilterSites = filterCampaignSitesWithCreatives.filter((site) => site.name.toLowerCase().includes(siteFilterSearch.toLowerCase()));
   const visibleFilterPlacements = filterCampaignPlacementsWithCreatives.filter((placement) => placement.name.toLowerCase().includes(placementFilterSearch.toLowerCase()));
   const visibleFilterAds = filterableCampaignAds.filter((ad) => ad.name.toLowerCase().includes(adFilterSearch.toLowerCase()));
+  const selectedAssignedCreativeCount = Array.from(selectedCreativeIds)
+    .filter((id) => (assignmentAdIdsByCreative[id] || []).length > 0).length;
 
   return (
     <div className="view-root flex-1 flex flex-col h-full bg-slate-950/40">
@@ -1424,8 +1548,8 @@ const CreativeGrid: React.FC = () => {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex p-1 bg-slate-950 rounded-lg border border-slate-800 mr-2">
+        <div className="flex items-center justify-end gap-2 flex-wrap">
+          <div className="flex p-1 bg-slate-950 rounded-lg border border-slate-800">
             <button 
               onClick={() => setViewMode('grid')}
               className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-slate-800 text-blue-400' : 'text-slate-600 hover:text-slate-400'}`}
@@ -1446,7 +1570,7 @@ const CreativeGrid: React.FC = () => {
               input?.click();
             }}
             disabled={!selectedAdvertiser}
-            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 rounded-lg text-sm font-semibold transition-all border border-emerald-500/30 disabled:opacity-50 disabled:grayscale"
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 rounded-lg text-xs font-semibold whitespace-nowrap transition-all border border-emerald-500/30 disabled:opacity-50 disabled:grayscale"
           >
             <UploadCloud className="w-4 h-4" />
             Batch Upload
@@ -1460,17 +1584,31 @@ const CreativeGrid: React.FC = () => {
             }}
             disabled={!selectedAdvertiser || selectedCreativeIds.size === 0}
             title={selectedCreativeIds.size === 0 ? 'Selecciona al menos una creatividad en la tabla' : undefined}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all border bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border-blue-500/40 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-all border bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border-blue-500/40 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
           >
             <SearchCode className="w-4 h-4" />
             Edit{selectedCreativeIds.size > 0 ? ` (${selectedCreativeIds.size})` : ''}
+          </button>
+
+          <button
+            onClick={handleUnassignSelectedCreatives}
+            disabled={selectedAssignedCreativeCount === 0 || isUnassigningCreatives || isLoadingAssignments}
+            title={selectedCreativeIds.size === 0
+              ? 'Selecciona creatividades asignadas en la tabla'
+              : selectedAssignedCreativeCount === 0
+                ? 'Las creatividades seleccionadas no tienen asignaciones'
+                : 'Desasignar las creatividades seleccionadas de todos sus Ads'}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-all border bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border-rose-500/30 disabled:opacity-40 disabled:grayscale disabled:cursor-not-allowed"
+          >
+            {isUnassigningCreatives ? <Loader2 className="w-4 h-4 animate-spin" /> : <Unlink className="w-4 h-4" />}
+            {isUnassigningCreatives ? 'Unassigning...' : `Unassign${selectedAssignedCreativeCount > 0 ? ` (${selectedAssignedCreativeCount})` : ''}`}
           </button>
 
           <div className="relative">
             <button
               onClick={() => setIsNewMenuOpen(!isNewMenuOpen)}
               disabled={toast.type === 'loading' && toast.show}
-              className={`flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed`}
+              className={`flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold whitespace-nowrap transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed`}
             >
               {toast.type === 'loading' && toast.show ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
               Upload
@@ -1709,8 +1847,8 @@ const CreativeGrid: React.FC = () => {
             ))}
           </div>
         ) : (
-          <div className="list-surface bg-[#152542] border border-[#2a4163] rounded-2xl overflow-hidden">
-            <table className="w-full text-left border-collapse">
+          <div className="list-surface bg-[#152542] border border-[#2a4163] rounded-2xl overflow-x-auto custom-scrollbar">
+            <table className="w-full min-w-[1180px] text-left border-collapse">
               <colgroup>
                 <col style={{ width: 44 }} />
                 <col style={{ width: listColumnWidths.preview }} />
@@ -1718,6 +1856,7 @@ const CreativeGrid: React.FC = () => {
                 <col style={{ width: listColumnWidths.type }} />
                 <col style={{ width: listColumnWidths.size }} />
                 <col style={{ width: listColumnWidths.status }} />
+                <col style={{ width: listColumnWidths.assignment }} />
                 <col style={{ width: 64 }} />
               </colgroup>
               <thead>
@@ -1735,6 +1874,7 @@ const CreativeGrid: React.FC = () => {
                   <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 relative">Type<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startListResize('type', e.clientX, listColumnWidths.type)} /></th>
                   <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 relative">Dimensions<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startListResize('size', e.clientX, listColumnWidths.size)} /></th>
                   <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 relative">Status<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startListResize('status', e.clientX, listColumnWidths.status)} /></th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 relative">Assignments Status<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startListResize('assignment', e.clientX, listColumnWidths.assignment)} /></th>
                   <th className="p-4 w-12"></th>
                 </tr>
               </thead>
@@ -1783,6 +1923,26 @@ const CreativeGrid: React.FC = () => {
                           {creative.isDraft ? 'Draft' : (creative.active ? 'Active' : 'Paused')}
                         </span>
                       </div>
+                    </td>
+                    <td className="p-4">
+                      {isLoadingAssignments ? (
+                        <span className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking...
+                        </span>
+                      ) : (assignmentAdIdsByCreative[creative.id] || []).length > 0 ? (
+                        <span
+                          className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-xs font-bold text-emerald-300"
+                          title={`Assigned to ${assignmentAdIdsByCreative[creative.id].length} Ad(s)`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                          Assigned
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-slate-700/30 border border-slate-600/40 text-xs font-bold text-slate-400">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                          Unassigned
+                        </span>
+                      )}
                     </td>
                     <td className="p-4">
                       <div className="flex items-center gap-2">
