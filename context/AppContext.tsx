@@ -474,11 +474,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           isDraft: false,
           originalData: { ...p }
         }));
-        setPlacements(fetchedPlacements);
+        setPlacements((prev) => [...prev.filter((placement) => placement.campaignId !== campaignId), ...fetchedPlacements]);
         setPlacementsDrafts({}); // Clear drafts on new fetch
         console.log(`✅ ${fetchedPlacements.length} placements cargados.`);
       } else {
-        setPlacements([]);
+        setPlacements((prev) => prev.filter((placement) => placement.campaignId !== campaignId));
         setPlacementsDrafts({});
       }
     } catch (e) {
@@ -1170,7 +1170,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         console.error('Fetch ads error:', data);
-        setAds([]);
+        setAds((prev) => prev.filter((ad) => ad.campaignId !== campaignId));
         return [];
       }
 
@@ -1202,13 +1202,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         ? mappedAds.filter(ad => ad.placementIds.includes(placementId))
         : mappedAds;
 
-      setAds(filtered);
+      setAds((prev) => [...prev.filter((ad) => ad.campaignId !== campaignId), ...filtered]);
       setAdsDrafts({});
       setSelectedAd(prev => (prev && filtered.some(ad => ad.id === prev.id)) ? prev : null);
       return filtered;
     } catch (e) {
       console.error('Fetch ads error:', e);
-      setAds([]);
+      setAds((prev) => prev.filter((ad) => ad.campaignId !== campaignId));
       setAdsDrafts({});
       return [];
     } finally {
