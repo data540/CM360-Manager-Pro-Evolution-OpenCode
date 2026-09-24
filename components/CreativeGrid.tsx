@@ -745,6 +745,33 @@ const CreativeGrid: React.FC = () => {
     }));
   };
 
+  const filterManualAds = (candidateAds: Ad[]) => {
+    const query = manualAdSearch.trim().toLowerCase();
+    return candidateAds.filter((ad) =>
+      !query || ad.name.toLowerCase().includes(query) || ad.id.toLowerCase().includes(query)
+    );
+  };
+
+  const handleSelectAllVisibleManualAds = () => {
+    if (manualPlanIndex === null) return;
+    setBatchPlans((prev) => prev.map((plan, idx) => {
+      if (idx !== manualPlanIndex) return plan;
+      const visibleIds = filterManualAds(plan.candidateAds)
+        .filter((ad) => !isDefaultAd(ad))
+        .map((ad) => ad.id);
+      return { ...plan, selectedAdIds: Array.from(new Set([...plan.selectedAdIds, ...visibleIds])) };
+    }));
+  };
+
+  const handleClearVisibleManualAds = () => {
+    if (manualPlanIndex === null) return;
+    setBatchPlans((prev) => prev.map((plan, idx) => {
+      if (idx !== manualPlanIndex) return plan;
+      const visibleIds = new Set(filterManualAds(plan.candidateAds).map((ad) => ad.id));
+      return { ...plan, selectedAdIds: plan.selectedAdIds.filter((id) => !visibleIds.has(id)) };
+    }));
+  };
+
   useEffect(() => {
     setManualAdSearch('');
   }, [manualPlanIndex]);
@@ -2224,11 +2251,30 @@ const CreativeGrid: React.FC = () => {
               />
             </div>
 
+            <div className="flex items-center justify-between mb-2 px-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                {filterManualAds(batchPlans[manualPlanIndex].candidateAds).length} results
+              </span>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleSelectAllVisibleManualAds}
+                  className="text-[10px] font-bold text-blue-400 hover:text-blue-300"
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearVisibleManualAds}
+                  className="text-[10px] font-bold text-blue-400 hover:text-blue-300"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
             <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
-              {batchPlans[manualPlanIndex].candidateAds.filter((ad) => {
-                const query = manualAdSearch.trim().toLowerCase();
-                return !query || ad.name.toLowerCase().includes(query) || ad.id.toLowerCase().includes(query);
-              }).map((ad) => {
+              {filterManualAds(batchPlans[manualPlanIndex].candidateAds).map((ad) => {
                 const checked = batchPlans[manualPlanIndex].selectedAdIds.includes(ad.id);
                 return (
                   <label
@@ -2257,10 +2303,7 @@ const CreativeGrid: React.FC = () => {
                   </label>
                 );
               })}
-              {batchPlans[manualPlanIndex].candidateAds.filter((ad) => {
-                const query = manualAdSearch.trim().toLowerCase();
-                return !query || ad.name.toLowerCase().includes(query) || ad.id.toLowerCase().includes(query);
-              }).length === 0 && (
+              {filterManualAds(batchPlans[manualPlanIndex].candidateAds).length === 0 && (
                 <p className="px-3 py-6 text-center text-xs text-slate-500">No Ads match this search.</p>
               )}
             </div>
