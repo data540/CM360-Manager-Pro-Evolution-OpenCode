@@ -137,6 +137,7 @@ const CreativeGrid: React.FC = () => {
     manualConfirmed: boolean;
   }>>([]);
   const [manualPlanIndex, setManualPlanIndex] = useState<number | null>(null);
+  const [manualAdSearch, setManualAdSearch] = useState('');
   const [applyManualSelectionToSameSize, setApplyManualSelectionToSameSize] = useState(true);
   const [isErrorGuideOpen, setIsErrorGuideOpen] = useState(false);
 
@@ -743,6 +744,10 @@ const CreativeGrid: React.FC = () => {
       };
     }));
   };
+
+  useEffect(() => {
+    setManualAdSearch('');
+  }, [manualPlanIndex]);
 
   const advanceManualFlow = (updatedPlans: typeof batchPlans) => {
     const nextManual = updatedPlans.findIndex((plan) => !plan.manualConfirmed);
@@ -2199,7 +2204,7 @@ const CreativeGrid: React.FC = () => {
             </p>
 
             <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 mb-4">
-              <p className="text-xs text-slate-300 font-semibold truncate">{batchPlans[manualPlanIndex].file.name}</p>
+              <p className="text-xs text-slate-300 font-semibold whitespace-normal break-words leading-5">{batchPlans[manualPlanIndex].file.name}</p>
               <p className="text-[10px] text-slate-500 mt-2">
                 Name size: {batchPlans[manualPlanIndex].sizeFromName || 'not detected'} · File size: {batchPlans[manualPlanIndex].sizeFromFile || 'not detected'}
               </p>
@@ -2208,8 +2213,22 @@ const CreativeGrid: React.FC = () => {
               )}
             </div>
 
+            <div className="relative mb-4">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+              <input
+                type="text"
+                value={manualAdSearch}
+                onChange={(e) => setManualAdSearch(e.target.value)}
+                placeholder="Search Ads by name or ID..."
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
             <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
-              {batchPlans[manualPlanIndex].candidateAds.map((ad) => {
+              {batchPlans[manualPlanIndex].candidateAds.filter((ad) => {
+                const query = manualAdSearch.trim().toLowerCase();
+                return !query || ad.name.toLowerCase().includes(query) || ad.id.toLowerCase().includes(query);
+              }).map((ad) => {
                 const checked = batchPlans[manualPlanIndex].selectedAdIds.includes(ad.id);
                 return (
                   <label
@@ -2229,8 +2248,8 @@ const CreativeGrid: React.FC = () => {
                       disabled={isDefaultAd(ad)}
                       onChange={() => handleToggleManualAd(ad.id)}
                     />
-                    <div className="min-w-0">
-                      <p className={`text-sm font-semibold truncate ${isDefaultAd(ad) ? 'text-slate-500' : 'text-slate-200'}`}>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-sm font-semibold whitespace-normal break-words leading-5 ${isDefaultAd(ad) ? 'text-slate-500' : 'text-slate-200'}`}>
                         {isDefaultAd(ad) ? `[DEFAULT - LOCKED] ${ad.name}` : ad.name}
                       </p>
                       <p className="text-[10px] text-slate-500 mt-1 font-mono">Ad ID: {ad.id}</p>
@@ -2238,6 +2257,12 @@ const CreativeGrid: React.FC = () => {
                   </label>
                 );
               })}
+              {batchPlans[manualPlanIndex].candidateAds.filter((ad) => {
+                const query = manualAdSearch.trim().toLowerCase();
+                return !query || ad.name.toLowerCase().includes(query) || ad.id.toLowerCase().includes(query);
+              }).length === 0 && (
+                <p className="px-3 py-6 text-center text-xs text-slate-500">No Ads match this search.</p>
+              )}
             </div>
 
             <label className="mt-4 flex items-center gap-2 text-[11px] text-slate-300">
