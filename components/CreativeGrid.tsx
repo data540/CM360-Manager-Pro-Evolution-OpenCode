@@ -285,6 +285,25 @@ const CreativeGrid: React.FC = () => {
     return collapseUnderscores(tokens.map(toNameToken).filter(Boolean).join('_'));
   };
 
+  const getFileNameWithoutExtension = (fileName: string): string => {
+    return fileName.replace(/\.[^./\\]+$/, '');
+  };
+
+  const formatBatchDateToken = (date = new Date()): string => {
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${day}${month}${date.getFullYear()}`;
+  };
+
+  const buildBatchCreativeName = (
+    fileName: string,
+    prefix: string,
+    suffix: string,
+    dateToken: string,
+  ): string => {
+    return joinNameTokens([prefix, getFileNameWithoutExtension(fileName), suffix, dateToken]);
+  };
+
   const getImageSize = (file: File): Promise<string | null> => {
     return new Promise((resolve) => {
       if (!file.type.startsWith('image/')) {
@@ -398,7 +417,9 @@ const CreativeGrid: React.FC = () => {
 
     setIsUploadModalOpen(false);
     setManualPlanIndex(null);
-    const dateToken = includeDate ? new Date().toLocaleDateString('es-ES').replace(/\//g, '-') : '';
+    const batchPrefix = namingPrefix;
+    const batchSuffix = namingSuffix;
+    const dateToken = includeDate ? formatBatchDateToken() : '';
     const siteNamesLabel = campaignSites
       .filter((s) => effectiveSelectedSiteIds.has(s.id))
       .map((s) => s.name)
@@ -410,8 +431,7 @@ const CreativeGrid: React.FC = () => {
 
     for (let i = 0; i < plans.length; i++) {
       const plan = plans[i];
-      const baseName = plan.file.name.split('.')[0];
-      const finalName = joinNameTokens([namingPrefix, baseName, namingSuffix, dateToken]);
+      const finalName = buildBatchCreativeName(plan.file.name, batchPrefix, batchSuffix, dateToken);
 
       setBatchProgress({
         current: i + 1,
@@ -2137,8 +2157,32 @@ const CreativeGrid: React.FC = () => {
                         checked={includeDate} 
                         onChange={() => setIncludeDate(!includeDate)} 
                       />
-                      <span className="text-[10px] font-bold text-slate-400 group-hover:text-slate-300 transition-colors">Append current date (DD-MM-YYYY)</span>
+                      <span className="text-[10px] font-bold text-slate-400 group-hover:text-slate-300 transition-colors">Append current date (DDMMYYYY)</span>
                     </label>
+
+                    <div>
+                      <label className="block text-[9px] uppercase font-bold text-slate-600 mb-1">Final names preview</label>
+                      <div className="space-y-1.5 rounded-xl border border-slate-800 bg-slate-900 px-4 py-3">
+                        {pendingFiles.slice(0, 3).map((file) => (
+                          <p
+                            key={`${file.name}-${file.lastModified}`}
+                            className="text-[10px] font-mono leading-4 text-slate-300 break-all"
+                          >
+                            {buildBatchCreativeName(
+                              file.name,
+                              namingPrefix,
+                              namingSuffix,
+                              includeDate ? formatBatchDateToken() : '',
+                            )}
+                          </p>
+                        ))}
+                        {pendingFiles.length > 3 && (
+                          <p className="text-[9px] font-bold text-slate-500">
+                            +{pendingFiles.length - 3} more
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
