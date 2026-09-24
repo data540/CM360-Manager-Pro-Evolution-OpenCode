@@ -16,9 +16,10 @@ interface ToastPayload {
 interface CreativeBulkEditPanelProps {
   onClose: () => void;
   onToast: (toast: ToastPayload) => void;
+  initialSelectedCreativeIds?: string[];
 }
 
-const CreativeBulkEditPanel: React.FC<CreativeBulkEditPanelProps> = ({ onClose, onToast }) => {
+const CreativeBulkEditPanel: React.FC<CreativeBulkEditPanelProps> = ({ onClose, onToast, initialSelectedCreativeIds }) => {
   const {
     selectedAdvertiser,
     campaigns, fetchCampaigns,
@@ -64,6 +65,16 @@ const CreativeBulkEditPanel: React.FC<CreativeBulkEditPanelProps> = ({ onClose, 
       fetchLandingPages(selectedAdvertiser.id);
     }
   }, [selectedAdvertiser]);
+
+  // Direct-selection entry point: opened from CreativeGrid with a pre-made
+  // multiselection, skipping the internal campaign search step.
+  useEffect(() => {
+    if (initialSelectedCreativeIds && initialSelectedCreativeIds.length > 0) {
+      setSelectedRowIds(new Set(initialSelectedCreativeIds));
+      setStep('edit');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const campaignMatches = useMemo(() => {
     if (!campaignQuery.trim()) return [];
@@ -169,9 +180,11 @@ const CreativeBulkEditPanel: React.FC<CreativeBulkEditPanelProps> = ({ onClose, 
     });
   };
 
+  // Sourced from the full `creatives` list (not `candidateCreatives`) so that a
+  // direct selection coming from CreativeGrid works even without a picked campaign.
   const selectedCreativesList = useMemo(
-    () => candidateCreatives.filter((c) => selectedRowIds.has(c.id)),
-    [candidateCreatives, selectedRowIds]
+    () => creatives.filter((c) => selectedRowIds.has(c.id)),
+    [creatives, selectedRowIds]
   );
 
   const namePreview = useMemo(() => {

@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Search, RefreshCw, ExternalLink, Megaphone, CheckCircle2, X, AlertCircle, MoreVertical, Zap } from 'lucide-react';
+import { Search, RefreshCw, ExternalLink, Megaphone, CheckCircle2, X, AlertCircle, MoreVertical, Zap, Plus } from 'lucide-react';
 import BulkNamingModal, { applyBulkNamingConfig } from './BulkNamingModal';
+import CreateAdModal from './CreateAdModal';
 
 const AdGrid: React.FC = () => {
   const {
@@ -16,6 +17,7 @@ const AdGrid: React.FC = () => {
     unassignCreativeFromAd,
     updateAdName,
     publishSelectedAdDrafts,
+    createAd,
     isAdsLoading,
   } = useApp();
 
@@ -24,6 +26,7 @@ const AdGrid: React.FC = () => {
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [isBulkActionsOpen, setIsBulkActionsOpen] = useState(false);
   const [isBulkNamingOpen, setIsBulkNamingOpen] = useState(false);
+  const [isCreateAdOpen, setIsCreateAdOpen] = useState(false);
   const [unassigningCreativeId, setUnassigningCreativeId] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -190,6 +193,14 @@ const AdGrid: React.FC = () => {
         </button>
 
         <button
+          onClick={() => setIsCreateAdOpen(true)}
+          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold transition-all"
+        >
+          <Plus className="w-4 h-4" />
+          Crear Ad
+        </button>
+
+        <button
           onClick={() => selectedCampaign && fetchAds(selectedCampaign.id, placementFilter || undefined)}
           className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-bold border border-slate-700"
         >
@@ -339,6 +350,22 @@ const AdGrid: React.FC = () => {
             setActionNotice({ type: 'success', message: 'Draft naming changes prepared. Use Push to CM360 to confirm.' });
             setIsBulkNamingOpen(false);
             setSelectedRows(new Set());
+          }}
+        />
+      )}
+
+      {isCreateAdOpen && selectedCampaign && (
+        <CreateAdModal
+          placements={placements.filter((p) => p.campaignId === selectedCampaign.id)}
+          creatives={creatives}
+          defaultPlacementId={placementFilter || undefined}
+          onClose={() => setIsCreateAdOpen(false)}
+          onCreate={async ({ placementId, name, creativeId }) => {
+            const result = await createAd({ campaignId: selectedCampaign.id, placementId, name, creativeId });
+            if (result.success) {
+              setActionNotice({ type: 'success', message: `Ad "${name}" creado correctamente.` });
+            }
+            return result;
           }}
         />
       )}

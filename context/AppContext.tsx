@@ -69,9 +69,10 @@ interface AppContextType {
   fetchAdvertisers: () => Promise<void>;
   fetchCampaigns: (advertiserId: string) => Promise<void>;
   fetchPlacements: (campaignId: string) => Promise<void>;
-  fetchAds: (campaignId: string, placementId?: string) => Promise<void>;
+  fetchAds: (campaignId: string, placementId?: string) => Promise<Ad[]>;
   fetchCreatives: () => Promise<void>;
   fetchAllCreatives: () => Promise<void>;
+  fetchCreativesByIds: (ids: string[]) => Promise<Creative[]>;
   fetchSites: () => Promise<void>;
   fetchLandingPages: (advertiserId: string) => Promise<void>;
   createCampaign: (campaign: Partial<Campaign>) => Promise<{success: boolean, id?: string, error?: string}>;
@@ -83,6 +84,7 @@ interface AppContextType {
   updateCreativeStatus: (creativeIds: string[], active: boolean) => Promise<{success: number, failed: number, error?: string}>;
   copyCreative: (creativeId: string, destinationAdvertiserId: string) => Promise<{success: boolean, id?: string, error?: string}>;
   assignCreativeToPlacement: (creativeId: string, placementId: string, campaignId: string) => Promise<{success: boolean, id?: string, error?: string}>;
+  createAd: (params: { campaignId: string; placementId: string; name: string; creativeId?: string }) => Promise<{success: boolean, id?: string, error?: string}>;
   assignCreativeToAd: (creativeId: string, adId: string, campaignId?: string, mode?: 'add' | 'replace') => Promise<{success: boolean, id?: string, error?: string}>;
   unassignCreativeFromAd: (creativeId: string, adId: string, campaignId?: string) => Promise<{success: boolean, error?: string}>;
   isAdsLoading: boolean;
@@ -484,6 +486,38 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const mapCreativeFromApi = (c: any, advertiserId: string): Creative => {
+    const sizeStr = c.size ? `${c.size.width}x${c.size.height}` : '300x250';
+    const [width, height] = sizeStr.includes('x') ? sizeStr.split('x').map(Number) : [300, 250];
+    const firstClickTag = Array.isArray(c.clickTags) && c.clickTags.length > 0 ? c.clickTags[0] : null;
+    const landingPageId = c.defaultLandingPageId || c.landingPageId || firstClickTag?.advertiserLandingPageId || undefined;
+    const landingPageUrl = firstClickTag?.clickThroughUrl?.computedClickThroughUrl || firstClickTag?.clickThroughUrl?.customClickThroughUrl || firstClickTag?.clickThroughUrl?.defaultLandingPage || undefined;
+
+    const simulatedThumb = `https://picsum.photos/seed/${c.id}/${width || 300}/${height || 250}`;
+
+    // Construcción de la URL basada en la estructura real de CM360 observada en la imagen
+    // Si hay una campaña seleccionada, usamos el explorer de la campaña.
+    // Si no, usamos la vista de anunciante.
+    const baseUrl = `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}`;
+    const creativePath = selectedCampaign
+      ? `/campaigns/${selectedCampaign.id}/explorer/creatives/${c.id}`
+      : `/advertisers/${advertiserId}/creatives/${c.id}`;
+
+    return {
+      id: c.id,
+      name: c.name,
+      type: c.type,
+      size: sizeStr,
+      status: 'Active',
+      active: c.active, // Add active status
+      thumbnailUrl: simulatedThumb,
+      placementIds: [],
+      externalUrl: `${baseUrl}${creativePath}`,
+      landingPageId,
+      landingPageUrl,
+    };
+  };
+
   const fetchCreativesInternal = async (token: string, pid: string, advertiserId: string) => {
     try {
       console.log(`📡 Cargando creatividades para el anunciante ${advertiserId}...`);
@@ -492,37 +526,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
       const data = await res.json();
       if (data.creatives) {
-        const mappedCreatives: Creative[] = data.creatives.map((c: any) => {
-          const sizeStr = c.size ? `${c.size.width}x${c.size.height}` : '300x250';
-          const [width, height] = sizeStr.includes('x') ? sizeStr.split('x').map(Number) : [300, 250];
-          const firstClickTag = Array.isArray(c.clickTags) && c.clickTags.length > 0 ? c.clickTags[0] : null;
-          const landingPageId = c.defaultLandingPageId || c.landingPageId || firstClickTag?.advertiserLandingPageId || undefined;
-          const landingPageUrl = firstClickTag?.clickThroughUrl?.computedClickThroughUrl || firstClickTag?.clickThroughUrl?.customClickThroughUrl || firstClickTag?.clickThroughUrl?.defaultLandingPage || undefined;
-          
-          const simulatedThumb = `https://picsum.photos/seed/${c.id}/${width || 300}/${height || 250}`;
-
-          // Construcción de la URL basada en la estructura real de CM360 observada en la imagen
-          // Si hay una campaña seleccionada, usamos el explorer de la campaña. 
-          // Si no, usamos la vista de anunciante.
-          const baseUrl = `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}`;
-          const creativePath = selectedCampaign 
-            ? `/campaigns/${selectedCampaign.id}/explorer/creatives/${c.id}`
-            : `/advertisers/${advertiserId}/creatives/${c.id}`;
-
-          return {
-            id: c.id,
-            name: c.name,
-            type: c.type,
-            size: sizeStr,
-            status: 'Active',
-            active: c.active, // Add active status
-            thumbnailUrl: simulatedThumb,
-            placementIds: [],
-            externalUrl: `${baseUrl}${creativePath}`,
-            landingPageId,
-            landingPageUrl,
-          };
-        });
+        const mappedCreatives: Creative[] = data.creatives.map((c: any) => mapCreativeFromApi(c, advertiserId));
         setCreatives(mappedCreatives);
         setCreativesDrafts({});
         console.log(`✅ ${mappedCreatives.length} creatividades cargadas.`);
@@ -540,6 +544,49 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (accessToken && profileId && selectedAdvertiser) {
       await fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
     }
+  };
+
+  // Fetches a specific set of creatives by id (resolved from Ad.creativeIds) and merges
+  // the returned records into `creatives`. Use the canonical get endpoint so the IDs from
+  // an Ad assignment cannot be lost to list filters or advertiser pagination.
+  const fetchCreativesByIds = async (ids: string[]): Promise<Creative[]> => {
+    if (!accessToken || !profileId || !selectedAdvertiser || ids.length === 0) return [];
+
+    const uniqueIds = Array.from(new Set(ids));
+    const CONCURRENCY = 10;
+    const fetched: Creative[] = [];
+
+    for (let i = 0; i < uniqueIds.length; i += CONCURRENCY) {
+      const batch = uniqueIds.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(batch.map(async (id) => {
+        try {
+          const res = await fetch(`/api/cm360/userprofiles/${profileId}/creatives/${encodeURIComponent(id)}`, {
+            headers: { Authorization: `Bearer ${accessToken}` }
+          });
+          const data = await res.json().catch(() => ({}));
+          const rawCreative = data?.creative || data;
+          if (!res.ok || !rawCreative?.id || String(rawCreative.id) !== String(id)) {
+            console.error(`Fetch creative ${id} by id failed:`, data);
+            return null;
+          }
+          return mapCreativeFromApi(rawCreative, selectedAdvertiser.id);
+        } catch (e) {
+          console.error(`Fetch creative ${id} by id error:`, e);
+          return null;
+        }
+      }));
+      fetched.push(...results.filter((creative): creative is Creative => !!creative));
+    }
+
+    if (fetched.length > 0) {
+      setCreatives((prev) => {
+        const byId = new Map(prev.map((c) => [c.id, c]));
+        fetched.forEach((c) => byId.set(c.id, c));
+        return Array.from(byId.values());
+      });
+    }
+
+    return fetched;
   };
 
   const fetchAllCreatives = async () => {
@@ -1112,8 +1159,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  const fetchAds = async (campaignId: string, placementId?: string) => {
-    if (!accessToken || !profileId || !campaignId) return;
+  const fetchAds = async (campaignId: string, placementId?: string): Promise<Ad[]> => {
+    if (!accessToken || !profileId || !campaignId) return [];
     try {
       setIsAdsLoading(true);
       const res = await fetch(`/api/cm360/userprofiles/${profileId}/ads?campaignIds=${campaignId}&maxResults=200`, {
@@ -1124,7 +1171,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (!res.ok) {
         console.error('Fetch ads error:', data);
         setAds([]);
-        return;
+        return [];
       }
 
       const mappedAds: Ad[] = (data.ads || []).map((ad: any) => {
@@ -1158,10 +1205,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setAds(filtered);
       setAdsDrafts({});
       setSelectedAd(prev => (prev && filtered.some(ad => ad.id === prev.id)) ? prev : null);
+      return filtered;
     } catch (e) {
       console.error('Fetch ads error:', e);
       setAds([]);
       setAdsDrafts({});
+      return [];
     } finally {
       setIsAdsLoading(false);
     }
@@ -1438,6 +1487,50 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return { success: false, error: adData.error?.message || 'Ad creation failed' };
     } catch (e: any) {
       console.error("Assign creative error:", e);
+      return { success: false, error: e.message || 'Network error' };
+    }
+  };
+
+  const createAd = async (params: { campaignId: string; placementId: string; name: string; creativeId?: string }) => {
+    const { campaignId, placementId, name, creativeId } = params;
+    if (!accessToken || !profileId) return { success: false, error: 'No connection' };
+    try {
+      const body: any = {
+        campaignId,
+        name,
+        active: true,
+        type: 'AD_SERVING_STANDARD_AD',
+        placementAssignments: [{
+          placementId,
+          active: true
+        }],
+        startTime: new Date().toISOString(),
+        endTime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() // 30 days default
+      };
+      if (creativeId) {
+        body.creativeAssignments = [{
+          creativeId,
+          active: true
+        }];
+      }
+
+      const adRes = await fetch(`/api/cm360/userprofiles/${profileId}/ads`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+
+      const adData = await adRes.json();
+      if (adRes.ok) {
+        await fetchAds(campaignId);
+        return { success: true, id: adData.id };
+      }
+      return { success: false, error: adData.error?.message || 'Ad creation failed' };
+    } catch (e: any) {
+      console.error("Create ad error:", e);
       return { success: false, error: e.message || 'Network error' };
     }
   };
@@ -2317,7 +2410,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setSelectedAdvertiser, setSelectedCampaign, setSelectedAd, setCurrentView, setIsGlobalSearchActive,
       addPlacements, updateCampaignDraft, updatePlacement, updatePlacementDraft, updatePlacementName, updateAdDraft, updateCreativeDraft, updateAdName, updateCreativeName, deletePlacement, publishSelectedDrafts, publishSelectedAdDrafts, publishSelectedCreativeDrafts,
       connectionStatus, isAuthenticated, accessToken, profileId, accountId, accounts, switchAccount, user, login, loginWithToken, enterDemoMode, logout,
-      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchAds, fetchCreatives, fetchAllCreatives, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, pushCampaigns, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement, assignCreativeToAd, unassignCreativeFromAd, isAdsLoading
+      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchAds, fetchCreatives, fetchAllCreatives, fetchCreativesByIds, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, pushCampaigns, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement, createAd, assignCreativeToAd, unassignCreativeFromAd, isAdsLoading
     }}>
       {children}
     </AppContext.Provider>

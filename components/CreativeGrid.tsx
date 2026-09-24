@@ -56,11 +56,16 @@ const CreativeGrid: React.FC = () => {
     fetchPlacements,
     fetchSites,
     fetchAds,
+    fetchCreativesByIds,
     assignCreativeToPlacement,
     assignCreativeToAd,
     creativesDrafts,
     fetchLandingPages
   } = useApp();
+  // Context methods are recreated on provider renders. Keep their latest implementations
+  // available without making data-loading effects rerun after every unrelated state update.
+  const fetchersRef = React.useRef({ fetchAllCreatives, fetchLandingPages, fetchAds, fetchPlacements });
+  fetchersRef.current = { fetchAllCreatives, fetchLandingPages, fetchAds, fetchPlacements };
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [loading, setLoading] = useState(false);
@@ -68,7 +73,24 @@ const CreativeGrid: React.FC = () => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isBulkEditPanelOpen, setIsBulkEditPanelOpen] = useState(false);
+  const [bulkEditInitialIds, setBulkEditInitialIds] = useState<string[] | undefined>(undefined);
   const [isNewMenuOpen, setIsNewMenuOpen] = useState(false);
+
+  // Campaign / Ads / Placements filter bar (top toolbar) + row multiselection for the main
+  // Creatives table. "selected*" = pending choices in the dropdowns; "applied*" = what the
+  // "Cargar" button has actually resolved into a CM360 fetch and applied to the table.
+  const [filterCampaignId, setFilterCampaignId] = useState<string>(selectedCampaign?.id || '');
+  const [appliedCampaignId, setAppliedCampaignId] = useState<string>('');
+  const [appliedCreativeIds, setAppliedCreativeIds] = useState<Set<string> | null>(null);
+  const [filterLoadedCreatives, setFilterLoadedCreatives] = useState<Creative[]>([]);
+  const [selectedAdIds, setSelectedAdIds] = useState<Set<string>>(new Set());
+  const [appliedAdIds, setAppliedAdIds] = useState<Set<string>>(new Set());
+  const [isAdFilterOpen, setIsAdFilterOpen] = useState(false);
+  const [selectedPlacementIds, setSelectedPlacementIds] = useState<Set<string>>(new Set());
+  const [appliedPlacementIds, setAppliedPlacementIds] = useState<Set<string>>(new Set());
+  const [isPlacementFilterOpen, setIsPlacementFilterOpen] = useState(false);
+  const [isLoadingPlacementCreatives, setIsLoadingPlacementCreatives] = useState(false);
+  const [selectedCreativeIds, setSelectedCreativeIds] = useState<Set<string>>(new Set());
 
   // Naming Convention States
   const [namingPrefix, setNamingPrefix] = useState('');
@@ -142,6 +164,28 @@ const CreativeGrid: React.FC = () => {
   const campaignPlacements = selectedCampaign
     ? placements.filter((p) => p.campaignId === selectedCampaign.id)
     : [];
+
+  // Independent from selectedCampaign/campaignAds/campaignPlacements above (used by the
+  // Batch Upload flow) — this is the data backing the Campaign/Ads/Placements filter bar,
+  // which can point at a different campaign than the sidebar's current selection.
+  const filterCampaignAds = filterCampaignId
+    ? ads.filter((ad) => ad.campaignId === filterCampaignId && !isDefaultAd(ad))
+    : [];
+  const filterCampaignPlacements = filterCampaignId
+    ? placements.filter((p) => p.campaignId === filterCampaignId)
+    : [];
+  // Start from placements that currently have creatives assigned through a non-default Ad.
+  const filterCampaignAdsWithCreatives = filterCampaignAds.filter((ad) => ad.creativeIds.length > 0);
+  const placementIdsWithCreatives = new Set(
+    filterCampaignAdsWithCreatives
+      .flatMap((ad) => ad.placementIds)
+  );
+  const filterCampaignPlacementsWithCreatives = filterCampaignPlacements.filter((p) => placementIdsWithCreatives.has(p.id));
+  // Ads follow Placements in the CM360 hierarchy, so narrow the Ad choices from the
+  // pending Placement selection. Ads without creatives cannot produce table rows.
+  const filterableCampaignAds = filterCampaignAdsWithCreatives.filter((ad) =>
+    selectedPlacementIds.size === 0 || ad.placementIds.some((id) => selectedPlacementIds.has(id))
+  );
   const campaignSites: Site[] = (() => {
     const uniqueSiteIds = Array.from(new Set(campaignPlacements.map((p) => p.siteId).filter(Boolean)));
     return uniqueSiteIds
@@ -744,7 +788,9 @@ const CreativeGrid: React.FC = () => {
 
   const handleRefresh = async () => {
     setLoading(true);
-    if (isGlobalSearchActive) {
+    if (appliedCampaignId) {
+      await handleLoadFilters();
+    } else if (isGlobalSearchActive) {
       await fetchAllCreatives();
     } else if (selectedAdvertiser) {
       await fetchCreatives();
@@ -818,23 +864,60 @@ const CreativeGrid: React.FC = () => {
 
   useEffect(() => {
     if (isGlobalSearchActive && !selectedAdvertiser) {
-      fetchAllCreatives();
+      fetchersRef.current.fetchAllCreatives();
     }
-  }, [isGlobalSearchActive, selectedAdvertiser, fetchAllCreatives]);
-
-  useEffect(() => {
-    if (selectedAdvertiser && !isGlobalSearchActive) {
-      fetchCreatives();
-    }
-  }, [selectedAdvertiser, isGlobalSearchActive, fetchCreatives]);
+  }, [isGlobalSearchActive, selectedAdvertiser?.id, advertisers.length, accessToken, profileId]);
 
   useEffect(() => {
     if (selectedAdvertiser) {
-      fetchLandingPages(selectedAdvertiser.id);
+      fetchersRef.current.fetchLandingPages(selectedAdvertiser.id);
     }
-  }, [selectedAdvertiser, fetchLandingPages]);
+  }, [selectedAdvertiser?.id, accessToken, profileId]);
 
-  const displayCreatives = creatives.map((c) => ({
+  // Keep campaign Ads loaded so the Placement/Ads filters (which relate Creatives to
+  // Placements indirectly, via Ad.creativeIds + Ad.placementIds) have data to work with.
+  useEffect(() => {
+    if (selectedCampaign && !isGlobalSearchActive) {
+      fetchersRef.current.fetchAds(selectedCampaign.id);
+    }
+  }, [selectedCampaign?.id, isGlobalSearchActive, accessToken, profileId]);
+
+  // The filter bar's Campaign select defaults to the sidebar's current campaign, but can be
+  // changed independently. Whenever it changes, load its Ads + Placements so the Ads and
+  // Placements dropdowns have real options to pick from.
+  useEffect(() => {
+    setFilterCampaignId(selectedCampaign?.id || '');
+  }, [selectedCampaign?.id]);
+
+  useEffect(() => {
+    if (filterCampaignId && !isGlobalSearchActive) {
+      fetchersRef.current.fetchPlacements(filterCampaignId);
+      fetchersRef.current.fetchAds(filterCampaignId);
+    }
+  }, [filterCampaignId, isGlobalSearchActive, accessToken, profileId]);
+
+  useEffect(() => {
+    setSelectedAdIds(new Set());
+    setAppliedAdIds(new Set());
+    setSelectedPlacementIds(new Set());
+    setAppliedPlacementIds(new Set());
+    setAppliedCampaignId('');
+    setAppliedCreativeIds(null);
+    setFilterLoadedCreatives([]);
+    setSelectedCreativeIds(new Set());
+  }, [filterCampaignId, isGlobalSearchActive]);
+
+  // Keep the exact creative IDs resolved by the last completed filter load. Deriving them
+  // from shared `ads` state races with other campaign fetches and can leave the table empty.
+  const filterResolvedCreativeIds = appliedCreativeIds;
+
+  const creativesForDisplay = React.useMemo(() => {
+    const byId = new Map(creatives.map((creative) => [String(creative.id), creative]));
+    filterLoadedCreatives.forEach((creative) => byId.set(String(creative.id), creative));
+    return Array.from(byId.values());
+  }, [creatives, filterLoadedCreatives]);
+
+  const displayCreatives = creativesForDisplay.map((c) => ({
     ...c,
     ...(creativesDrafts[c.id] || {}),
     isDraft: !!creativesDrafts[c.id],
@@ -842,12 +925,161 @@ const CreativeGrid: React.FC = () => {
 
   const filteredCreatives = displayCreatives.filter(c => {
     const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase());
-    // If global search is active, we ignore the campaign filter
+    // If global search is active, we ignore the campaign and placement filters
     if (isGlobalSearchActive) return matchesSearch;
-    
+
+    // A loaded Campaign/Ads/Placements filter is authoritative (real Ad-derived relationship)
+    // and replaces the weak campaign-name heuristic below, which can otherwise produce false
+    // negatives for creatives that don't follow that naming convention.
+    if (filterResolvedCreativeIds) {
+      return matchesSearch && filterResolvedCreativeIds.has(c.id);
+    }
+
     const matchesCampaign = !selectedCampaign || c.name.toLowerCase().includes(selectedCampaign.name.substring(0, 5).toLowerCase());
     return matchesSearch && matchesCampaign;
   });
+
+  const togglePlacementFilter = (placementId: string) => {
+    const next = new Set(selectedPlacementIds);
+    if (next.has(placementId)) next.delete(placementId); else next.add(placementId);
+    setSelectedPlacementIds(next);
+    const validAdIds = new Set(filterCampaignAdsWithCreatives
+      .filter((ad) => next.size === 0 || ad.placementIds.some((id) => next.has(id)))
+      .map((ad) => ad.id));
+    setSelectedAdIds((prev) => new Set(Array.from(prev).filter((id) => validAdIds.has(id))));
+  };
+
+  const toggleAdFilter = (adId: string) => {
+    const next = new Set(selectedAdIds);
+    if (next.has(adId)) next.delete(adId); else next.add(adId);
+    setSelectedAdIds(next);
+  };
+
+  const handleTogglePlacementDropdown = () => {
+    setIsPlacementFilterOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        // Opening: reflect whatever is currently applied, not stale pending checks.
+        setSelectedPlacementIds(new Set(appliedPlacementIds));
+        const validAdIds = new Set(filterCampaignAdsWithCreatives
+          .filter((ad) => appliedPlacementIds.size === 0 || ad.placementIds.some((id) => appliedPlacementIds.has(id)))
+          .map((ad) => ad.id));
+        setSelectedAdIds((prev) => new Set(Array.from(prev).filter((id) => validAdIds.has(id))));
+      }
+      return next;
+    });
+  };
+
+  const handleToggleAdDropdown = () => {
+    setIsAdFilterOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        const validAdIds = new Set(filterableCampaignAds.map((ad) => ad.id));
+        setSelectedAdIds(new Set(Array.from(appliedAdIds).filter((id) => validAdIds.has(id))));
+      }
+      return next;
+    });
+  };
+
+  // Single entry point for the Campaign/Ads/Placements filter bar. Fetches fresh Ads for the
+  // chosen campaign directly from CM360, resolves the exact creativeIds implied by the
+  // Ads/Placements narrowing, then fetches those specific creatives (fetchCreativesByIds) so
+  // they're guaranteed to be present regardless of the generic per-advertiser 100-result cap.
+  const handleLoadFilters = async () => {
+    const campaignId = filterCampaignId;
+    const adIds = new Set(selectedAdIds);
+    const placementIds = new Set(selectedPlacementIds);
+
+    setIsPlacementFilterOpen(false);
+    setIsAdFilterOpen(false);
+
+    if (!campaignId) {
+      setToast({ show: true, type: 'error', message: 'Selecciona una campaña', details: 'Elige una campaña antes de cargar creatividades.' });
+      return;
+    }
+
+    setAppliedCampaignId(campaignId);
+    setAppliedAdIds(adIds);
+    setAppliedPlacementIds(placementIds);
+    setAppliedCreativeIds(new Set());
+    setFilterLoadedCreatives([]);
+    setSelectedCreativeIds(new Set());
+
+    setIsLoadingPlacementCreatives(true);
+    try {
+      const freshAds = await fetchAds(campaignId);
+      const relevantAds = freshAds.filter((ad) =>
+        (adIds.size === 0 || adIds.has(ad.id)) &&
+        (placementIds.size === 0 || ad.placementIds.some((pid) => placementIds.has(pid)))
+      );
+      const creativeIds = Array.from(new Set(relevantAds.flatMap((ad) => ad.creativeIds)));
+
+      if (creativeIds.length > 0) {
+        const fetchedCreatives = await fetchCreativesByIds(creativeIds);
+        const loadedIds = new Set(fetchedCreatives.map((creative) => String(creative.id)));
+        setFilterLoadedCreatives(fetchedCreatives);
+        setAppliedCreativeIds(loadedIds);
+
+        if (loadedIds.size === creativeIds.length) {
+          setToast({
+            show: true,
+            type: 'success',
+            message: `${loadedIds.size} creatividades cargadas`,
+            details: `${relevantAds.length} Ad(s) coinciden con el filtro seleccionado.`,
+          });
+        } else {
+          setToast({
+            show: true,
+            type: 'error',
+            message: loadedIds.size > 0
+              ? `Solo se pudieron cargar ${loadedIds.size} de ${creativeIds.length} creatividades`
+              : 'Los Ads coinciden, pero CM360 no devolvió sus creatividades',
+            details: `${relevantAds.length} Ad(s) coinciden. IDs de creatividad solicitados: ${creativeIds.join(', ')}.`,
+          });
+        }
+      } else {
+        setFilterLoadedCreatives([]);
+        setAppliedCreativeIds(new Set());
+        setToast({
+          show: true,
+          type: 'error',
+          message: 'Sin creatividades para este filtro',
+          details: relevantAds.length > 0
+            ? `${relevantAds.length} Ad(s) coinciden, pero ninguno tiene creatividades asignadas todavía.`
+            : 'Ningún Ad de esta campaña coincide con los Ads/Placements seleccionados.',
+        });
+      }
+    } finally {
+      setIsLoadingPlacementCreatives(false);
+    }
+  };
+
+  const handleClearFilters = () => {
+    setSelectedAdIds(new Set());
+    setAppliedAdIds(new Set());
+    setSelectedPlacementIds(new Set());
+    setAppliedPlacementIds(new Set());
+    setAppliedCampaignId('');
+    setAppliedCreativeIds(null);
+    setFilterLoadedCreatives([]);
+  };
+
+  const toggleCreativeSelection = (id: string) => {
+    setSelectedCreativeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllCreatives = () => {
+    setSelectedCreativeIds((prev) => {
+      if (filteredCreatives.length > 0 && filteredCreatives.every((c) => prev.has(c.id))) {
+        return new Set();
+      }
+      return new Set(filteredCreatives.map((c) => c.id));
+    });
+  };
 
   const getIcon = (type: string) => {
     if (type.includes('HTML5') || type.includes('RICH_MEDIA')) return <FileCode className="w-5 h-5 text-amber-500" />;
@@ -895,7 +1127,7 @@ const CreativeGrid: React.FC = () => {
   return (
     <div className="view-root flex-1 flex flex-col h-full bg-slate-950/40">
       {/* Toolbar */}
-      <div className="view-toolbar p-4 border-b border-slate-800 flex items-center justify-between gap-4 bg-slate-900/50 backdrop-blur-sm relative z-20">
+      <div className="view-toolbar p-4 border-b border-slate-800 flex items-center flex-wrap justify-between gap-3 bg-slate-900/50 backdrop-blur-sm relative z-20">
         <div className={`flex-1 max-w-md relative transition-all duration-300 ${isGlobalSearchActive ? 'ring-2 ring-blue-500/50 rounded-lg' : ''}`}>
           <Search className={`absolute left-3 top-2.5 w-4 h-4 ${isGlobalSearchActive ? 'text-blue-400' : 'text-slate-500'}`} />
           <input 
@@ -913,7 +1145,151 @@ const CreativeGrid: React.FC = () => {
             </div>
           )}
         </div>
-        
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative">
+            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+            <select
+              value={filterCampaignId}
+              onChange={(e) => setFilterCampaignId(e.target.value)}
+              disabled={isGlobalSearchActive || campaigns.length === 0}
+              className="w-64 max-w-[calc(100vw-2rem)] bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2.5 text-sm text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <option value="">Campaign...</option>
+              {campaigns.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="relative">
+            <button
+              onClick={handleTogglePlacementDropdown}
+              disabled={!filterCampaignId || isGlobalSearchActive}
+              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-sm font-semibold border transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                appliedPlacementIds.size > 0
+                  ? 'bg-blue-600/20 border-blue-500/40 text-blue-300'
+                  : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+              }`}
+            >
+              <Filter className="w-4 h-4" />
+              Placements{appliedPlacementIds.size > 0 ? ` (${appliedPlacementIds.size})` : ''}
+              <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${isPlacementFilterOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isPlacementFilterOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setIsPlacementFilterOpen(false)} />
+                <div className="absolute left-0 mt-2 w-[32rem] max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-40 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="flex items-center justify-between p-2 border-b border-slate-800 bg-slate-950/50">
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-2">
+                      Placements with creatives ({filterCampaignPlacementsWithCreatives.length})
+                    </span>
+                    {selectedPlacementIds.size > 0 && (
+                      <button onClick={() => setSelectedPlacementIds(new Set())} className="text-[10px] font-bold text-blue-400 hover:text-blue-300 px-2">
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-64 overflow-y-auto custom-scrollbar p-1">
+                    {filterCampaignPlacementsWithCreatives.length === 0 ? (
+                      <p className="text-xs text-slate-600 px-3 py-4 text-center">No hay placements para esta campaña.</p>
+                    ) : filterCampaignPlacementsWithCreatives.map((placement) => {
+                      const checked = selectedPlacementIds.has(placement.id);
+                      return (
+                        <label
+                          key={placement.id}
+                          className={`flex flex-wrap items-start gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${checked ? 'bg-blue-600/10' : 'hover:bg-slate-800/60'}`}
+                        >
+                          <input type="checkbox" className="accent-blue-500 mt-0.5 shrink-0" checked={checked} onChange={() => togglePlacementFilter(placement.id)} />
+                          <span className="flex-1 min-w-0 text-xs text-slate-200 whitespace-normal break-words leading-5" title={placement.name}>{placement.name}</span>
+                          <span className="shrink-0 text-[10px] font-mono text-slate-400">{placement.size}</span>
+                          <span className="basis-full pl-6 text-[9px] font-mono text-slate-600 break-all">ID {placement.id}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="relative">
+            <button
+              onClick={handleToggleAdDropdown}
+              disabled={!filterCampaignId || isGlobalSearchActive}
+              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-sm font-semibold border transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                appliedAdIds.size > 0
+                  ? 'bg-blue-600/20 border-blue-500/40 text-blue-300'
+                  : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+              }`}
+            >
+              <Filter className="w-4 h-4" />
+              Ads{appliedAdIds.size > 0 ? ` (${appliedAdIds.size})` : ''}
+              <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${isAdFilterOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isAdFilterOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setIsAdFilterOpen(false)} />
+                <div className="absolute left-0 mt-2 w-[32rem] max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-40 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="flex items-center justify-between p-2 border-b border-slate-800 bg-slate-950/50">
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-2">
+                      Ads with creatives ({filterableCampaignAds.length})
+                    </span>
+                    {selectedAdIds.size > 0 && (
+                      <button onClick={() => setSelectedAdIds(new Set())} className="text-[10px] font-bold text-blue-400 hover:text-blue-300 px-2">
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-64 overflow-y-auto custom-scrollbar p-1">
+                    {filterableCampaignAds.length === 0 ? (
+                      <p className="text-xs text-slate-600 px-3 py-4 text-center">No hay ads para esta campaña.</p>
+                    ) : filterableCampaignAds.map((ad) => {
+                      const checked = selectedAdIds.has(ad.id);
+                      const linkedPlacementNames = ad.placementIds
+                        .filter((id) => selectedPlacementIds.size === 0 || selectedPlacementIds.has(id))
+                        .map((id) => filterCampaignPlacements.find((placement) => placement.id === id)?.name || id);
+                      return (
+                        <label
+                          key={ad.id}
+                          className={`flex items-start gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${checked ? 'bg-blue-600/10' : 'hover:bg-slate-800/60'}`}
+                        >
+                          <input type="checkbox" className="accent-blue-500 mt-0.5 shrink-0" checked={checked} onChange={() => toggleAdFilter(ad.id)} />
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-xs text-slate-200 whitespace-normal break-words leading-5">{ad.name}</span>
+                            <span className="block text-[10px] text-slate-400 whitespace-normal break-words">Placement: {linkedPlacementNames.join(', ') || '—'}</span>
+                            <span className="block text-[9px] font-mono text-slate-600 break-all">ID {ad.id}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          <button
+            onClick={handleLoadFilters}
+            disabled={isLoadingPlacementCreatives || !filterCampaignId || isGlobalSearchActive}
+            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isLoadingPlacementCreatives && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            {isLoadingPlacementCreatives ? 'Cargando...' : 'Cargar'}
+          </button>
+
+          {(appliedCampaignId || appliedAdIds.size > 0 || appliedPlacementIds.size > 0) && (
+            <button
+              onClick={handleClearFilters}
+              className="text-xs font-bold text-slate-500 hover:text-slate-300 px-1"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
         <div className="flex items-center gap-2">
           <div className="flex p-1 bg-slate-950 rounded-lg border border-slate-800 mr-2">
             <button 
@@ -943,12 +1319,17 @@ const CreativeGrid: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setIsBulkEditPanelOpen(true)}
-            disabled={!selectedAdvertiser}
-            className="flex items-center gap-2 px-4 py-2.5 bg-slate-800/60 hover:bg-slate-800 text-slate-200 rounded-lg text-sm font-semibold transition-all border border-slate-700 disabled:opacity-50 disabled:grayscale"
+            onClick={() => {
+              if (selectedCreativeIds.size === 0) return;
+              setBulkEditInitialIds(Array.from(selectedCreativeIds));
+              setIsBulkEditPanelOpen(true);
+            }}
+            disabled={!selectedAdvertiser || selectedCreativeIds.size === 0}
+            title={selectedCreativeIds.size === 0 ? 'Selecciona al menos una creatividad en la tabla' : undefined}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all border bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border-blue-500/40 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
           >
             <SearchCode className="w-4 h-4" />
-            Edit
+            Edit{selectedCreativeIds.size > 0 ? ` (${selectedCreativeIds.size})` : ''}
           </button>
 
           <div className="relative">
@@ -958,7 +1339,7 @@ const CreativeGrid: React.FC = () => {
               className={`flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed`}
             >
               {toast.type === 'loading' && toast.show ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-              New
+              Upload
               <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${isNewMenuOpen ? 'rotate-180' : ''}`} />
             </button>
 
@@ -990,7 +1371,7 @@ const CreativeGrid: React.FC = () => {
                   </div>
 
                   <div className="p-2 border-b border-slate-800 bg-slate-950/50 mt-1">
-                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-2">Standard</span>
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-2">Upload</span>
                   </div>
                   <div className="p-1">
                     <button 
@@ -1001,19 +1382,8 @@ const CreativeGrid: React.FC = () => {
                       }}
                       className="w-full flex items-center gap-3 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <ImageIcon className="w-4 h-4 text-blue-500" />
-                      Display
-                    </button>
-                    <button 
-                      disabled={!selectedAdvertiser}
-                      onClick={() => {
-                        const input = document.getElementById('single-upload-input');
-                        input?.click();
-                      }}
-                      className="w-full flex items-center gap-3 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Video className="w-4 h-4 text-rose-500" />
-                      In-stream video
+                      <UploadCloud className="w-4 h-4 text-blue-500" />
+                      Upload one creative
                     </button>
                   </div>
                 </div>
@@ -1072,8 +1442,14 @@ const CreativeGrid: React.FC = () => {
             <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center mb-6 border border-slate-800">
               <ImageIcon className="w-8 h-8 text-slate-700" />
             </div>
-            <h3 className="text-slate-300 font-bold">No creatives found</h3>
-            <p className="text-slate-500 text-xs mt-1 max-w-xs mx-auto">Try syncing assets or adjusting your search terms.</p>
+            <h3 className="text-slate-300 font-bold">
+              {appliedCreativeIds !== null ? 'No creatives returned for this filter' : 'No creatives found'}
+            </h3>
+            <p className="text-slate-500 text-xs mt-1 max-w-xs mx-auto">
+              {appliedCreativeIds !== null
+                ? 'CM360 returned no creative records for the selected Ads. Review the load notification or retry.'
+                : 'Try syncing assets or adjusting your search terms.'}
+            </p>
             <button 
               onClick={handleRefresh}
               className="mt-6 text-blue-500 hover:text-blue-400 text-xs font-bold uppercase tracking-widest flex items-center gap-2 mx-auto"
@@ -1152,7 +1528,14 @@ const CreativeGrid: React.FC = () => {
                       )}
                     </div>
                   </div>
-                  <div className="absolute top-3 left-3">
+                  <div className="absolute top-3 left-3 flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="accent-blue-500 w-4 h-4"
+                      checked={selectedCreativeIds.has(creative.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggleCreativeSelection(creative.id)}
+                    />
                     <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-600/20 backdrop-blur-md border border-blue-500/30 text-[9px] font-bold text-blue-200 uppercase tracking-wider">
                       <span className="w-1.5 h-1.5 rounded-sm bg-blue-400" />
                       {creative.size}
@@ -1195,6 +1578,7 @@ const CreativeGrid: React.FC = () => {
           <div className="list-surface bg-[#152542] border border-[#2a4163] rounded-2xl overflow-hidden">
             <table className="w-full text-left border-collapse">
               <colgroup>
+                <col style={{ width: 44 }} />
                 <col style={{ width: listColumnWidths.preview }} />
                 <col style={{ width: listColumnWidths.name }} />
                 <col style={{ width: listColumnWidths.type }} />
@@ -1204,6 +1588,14 @@ const CreativeGrid: React.FC = () => {
               </colgroup>
               <thead>
                 <tr className="list-header-row bg-[#1b2d4d] border-b border-[#2a4163]">
+                  <th className="p-4">
+                    <input
+                      type="checkbox"
+                      className="accent-blue-500"
+                      checked={filteredCreatives.length > 0 && filteredCreatives.every((c) => selectedCreativeIds.has(c.id))}
+                      onChange={toggleSelectAllCreatives}
+                    />
+                  </th>
                   <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 relative">Preview<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startListResize('preview', e.clientX, listColumnWidths.preview)} /></th>
                   <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 relative">Name<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startListResize('name', e.clientX, listColumnWidths.name)} /></th>
                   <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 relative">Type<div className="absolute right-0 top-0 h-full w-1 cursor-col-resize" onMouseDown={(e) => startListResize('type', e.clientX, listColumnWidths.type)} /></th>
@@ -1214,7 +1606,15 @@ const CreativeGrid: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-[#263a5b]">
                 {filteredCreatives.map((creative) => (
-                  <tr key={creative.id} className="list-row group hover:bg-[#1b2d4d]/60 transition-colors">
+                  <tr key={creative.id} className={`list-row group hover:bg-[#1b2d4d]/60 transition-colors ${selectedCreativeIds.has(creative.id) ? 'bg-[#1f3458]' : ''}`}>
+                    <td className="p-4">
+                      <input
+                        type="checkbox"
+                        className="accent-blue-500"
+                        checked={selectedCreativeIds.has(creative.id)}
+                        onChange={() => toggleCreativeSelection(creative.id)}
+                      />
+                    </td>
                     <td className="p-4">
                       <div className="w-10 h-10 bg-slate-950 rounded-lg border border-slate-800 overflow-hidden flex items-center justify-center">
                         {renderCreativePlaceholder(creative, true)}
@@ -1331,7 +1731,12 @@ const CreativeGrid: React.FC = () => {
 
       {isBulkEditPanelOpen && (
         <CreativeBulkEditPanel
-          onClose={() => setIsBulkEditPanelOpen(false)}
+          initialSelectedCreativeIds={bulkEditInitialIds}
+          onClose={() => {
+            setIsBulkEditPanelOpen(false);
+            setBulkEditInitialIds(undefined);
+            setSelectedCreativeIds(new Set());
+          }}
           onToast={setToast}
         />
       )}
