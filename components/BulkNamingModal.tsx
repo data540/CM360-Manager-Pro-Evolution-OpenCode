@@ -27,7 +27,8 @@ export const applyBulkNamingConfig = (name: string, config: BulkNamingConfig): s
       return collapseConsecutiveUnderscores(`${name}${config.separator}${config.value}`);
     case 'replace':
       if (!config.replaceFrom) return name;
-      return collapseConsecutiveUnderscores(name.replace(new RegExp(config.replaceFrom, 'g'), config.value));
+      // Literal replace: user text must not be parsed as a RegExp ("(" used to crash the app).
+      return collapseConsecutiveUnderscores(name.split(config.replaceFrom).join(config.value));
     default:
       return name;
   }

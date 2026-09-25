@@ -96,11 +96,8 @@ const PlacementGrid: React.FC = () => {
     message: ''
   });
 
-  useEffect(() => {
-    if (selectedAdvertiser) {
-      fetchSites();
-    }
-  }, [selectedAdvertiser, fetchSites]);
+  // Sites are loaded by AppContext when the advertiser changes. Do not refetch here:
+  // fetchSites changes identity on every provider render, so depending on it looped forever.
 
   useEffect(() => {
     setSiteFilter('all');
@@ -257,7 +254,9 @@ const PlacementGrid: React.FC = () => {
     const selectedPlacements = filteredPlacements.filter((p) => selectedRows.has(p.id));
     if (selectedPlacements.length === 0) return;
 
-    const duplicates: Placement[] = selectedPlacements.map((placement) => ({
+    // Strip CM360 identity fields: a duplicate carrying the original cmId would be
+    // published as a PATCH over the original placement instead of a new one.
+    const duplicates: Placement[] = selectedPlacements.map(({ cmId: _cmId, originalData: _originalData, externalUrl: _externalUrl, ...placement }: Placement & { cmId?: string }) => ({
       ...placement,
       id: `plc-${Math.random().toString(36).slice(2, 11)}`,
       name: `${placement.name}_copy`,

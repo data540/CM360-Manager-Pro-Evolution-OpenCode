@@ -21,8 +21,6 @@ import {
   HelpCircle,
   ChevronDown as ChevronDownIcon,
   X as XIcon,
-  Layers,
-  LayoutDashboard,
   SearchCode,
   UploadCloud,
   Loader2,
@@ -66,8 +64,8 @@ const CreativeGrid: React.FC = () => {
   } = useApp();
   // Context methods are recreated on provider renders. Keep their latest implementations
   // available without making data-loading effects rerun after every unrelated state update.
-  const fetchersRef = React.useRef({ fetchAllCreatives, fetchLandingPages, fetchAds, fetchPlacements });
-  fetchersRef.current = { fetchAllCreatives, fetchLandingPages, fetchAds, fetchPlacements };
+  const fetchersRef = React.useRef({ fetchAllCreatives, fetchLandingPages, fetchAds, fetchPlacements, fetchCampaigns });
+  fetchersRef.current = { fetchAllCreatives, fetchLandingPages, fetchAds, fetchPlacements, fetchCampaigns };
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [loading, setLoading] = useState(false);
@@ -237,15 +235,15 @@ const CreativeGrid: React.FC = () => {
 
   useEffect(() => {
     if (activeModal === 'campaign' && destAdvertiserId) {
-      fetchCampaigns(destAdvertiserId);
+      fetchersRef.current.fetchCampaigns(destAdvertiserId);
     }
-  }, [activeModal, destAdvertiserId, fetchCampaigns]);
+  }, [activeModal, destAdvertiserId]);
 
   useEffect(() => {
     if (activeModal === 'placement' && destCampaignId) {
-      fetchPlacements(destCampaignId);
+      fetchersRef.current.fetchPlacements(destCampaignId);
     }
-  }, [activeModal, destCampaignId, fetchPlacements]);
+  }, [activeModal, destCampaignId]);
   
   const CREATIVE_SPECS: Record<string, string[]> = {
     'Display': ['970x250', '970x90', '728x90', '300x250', '160x600', '300x600', '300x1050', '468x60', '250x250', '200x200'],
@@ -475,7 +473,8 @@ const CreativeGrid: React.FC = () => {
         const failedNames: string[] = [];
         for (const adId of adsToAssign) {
           const targetAd = campaignAds.find((ad) => ad.id === adId);
-          const assignResult = await assignCreativeToAd(result.id, adId, selectedCampaign?.id, uploadAssignMode);
+          // Always 'add' in batch: 'replace' per file would leave only the last creative assigned.
+          const assignResult = await assignCreativeToAd(result.id, adId, selectedCampaign?.id, 'add');
           if (assignResult.success) {
             assignedNames.push(targetAd?.name || adId);
           } else {
@@ -636,7 +635,7 @@ const CreativeGrid: React.FC = () => {
       return;
     }
 
-    if (uploadAdId && uploadAssignMode === 'replace') {
+    if (!isBatch && uploadAdId && uploadAssignMode === 'replace') {
       const confirmed = window.confirm('Replace mode will overwrite current creative assignments in the selected Ad. Continue?');
       if (!confirmed) return;
     }
@@ -1781,30 +1780,9 @@ const CreativeGrid: React.FC = () => {
 
                       {activeActionMenu === creative.id && (
                         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 py-1 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
-                          <button 
-                            onClick={() => {
-                              setCreativeToAssign(creative);
-                              setActiveModal('advertiser');
-                              setActiveActionMenu(null);
-                            }}
-                            className="w-full flex items-center gap-3 px-4 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-colors"
-                          >
-                            <Layers className="w-3.5 h-3.5" />
-                            Assign to Advertiser
-                          </button>
-                          <button 
-                            onClick={() => {
-                              setCreativeToAssign(creative);
-                              setDestAdvertiserId(selectedAdvertiser?.id || '');
-                              setActiveModal('campaign');
-                              setActiveActionMenu(null);
-                            }}
-                            className="w-full flex items-center gap-3 px-4 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-colors"
-                          >
-                            <LayoutDashboard className="w-3.5 h-3.5" />
-                            Assign to Campaign
-                          </button>
-                          <button 
+                          {/* "Assign to Advertiser" / "Assign to Campaign" disabled: both ran copyCreative,
+                              which duplicated the creative and uploaded a placeholder image as its asset. */}
+                          <button
                             onClick={() => {
                               setCreativeToAssign(creative);
                               setDestCampaignId(selectedCampaign?.id || '');
@@ -1991,30 +1969,8 @@ const CreativeGrid: React.FC = () => {
 
                           {activeActionMenu === creative.id && (
                             <div className="absolute right-full top-0 mr-2 w-48 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 py-1 overflow-hidden animate-in fade-in slide-in-from-right-2">
-                              <button 
-                                onClick={() => {
-                                  setCreativeToAssign(creative);
-                                  setActiveModal('advertiser');
-                                  setActiveActionMenu(null);
-                                }}
-                                className="w-full flex items-center gap-3 px-4 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-colors"
-                              >
-                                <Layers className="w-3.5 h-3.5" />
-                                Assign to Advertiser
-                              </button>
-                              <button 
-                                onClick={() => {
-                                  setCreativeToAssign(creative);
-                                  setDestAdvertiserId(selectedAdvertiser?.id || '');
-                                  setActiveModal('campaign');
-                                  setActiveActionMenu(null);
-                                }}
-                                className="w-full flex items-center gap-3 px-4 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-colors"
-                              >
-                                <LayoutDashboard className="w-3.5 h-3.5" />
-                                Assign to Campaign
-                              </button>
-                              <button 
+                              {/* "Assign to Advertiser" / "Assign to Campaign" disabled (see grid view menu). */}
+                              <button
                                 onClick={() => {
                                   setCreativeToAssign(creative);
                                   setDestCampaignId(selectedCampaign?.id || '');
@@ -2358,7 +2314,7 @@ const CreativeGrid: React.FC = () => {
                     </option>
                   ))}
                 </select>
-                {((pendingFiles.length === 0) || (pendingFiles.length > 1 && batchAssignmentMode === 'single')) && (
+                {pendingFiles.length === 0 && (
                   <div className="mt-2">
                     <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Assignment Mode</label>
                     <select

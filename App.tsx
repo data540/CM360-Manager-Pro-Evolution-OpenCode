@@ -6,7 +6,6 @@ import PlacementGrid from './components/PlacementGrid';
 import CreativeGrid from './components/CreativeGrid';
 import CampaignGrid from './components/CampaignGrid';
 import AdGrid from './components/AdGrid';
-import AIHelper from './components/AIHelper';
 import Login from './components/Login';
 import SettingsPanel from './components/SettingsPanel';
 import { ChevronRight, LogOut } from 'lucide-react';
@@ -105,8 +104,6 @@ const MainContent: React.FC<{ theme: 'dark' | 'light'; onThemeChange: (theme: 'd
     switch (currentView) {
       case 'Placements':
         return <PlacementGrid />;
-      case 'AIHelper':
-        return <AIHelper />;
       case 'Campaigns':
         return <CampaignGrid />;
       case 'Creatives':
