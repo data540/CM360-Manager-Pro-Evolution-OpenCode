@@ -85,9 +85,58 @@ interface AppContextType {
   copyCreative: (creativeId: string, destinationAdvertiserId: string) => Promise<{success: boolean, id?: string, error?: string}>;
   assignCreativeToPlacement: (creativeId: string, placementId: string, campaignId: string) => Promise<{success: boolean, id?: string, error?: string}>;
   createAd: (params: { campaignId: string; placementId: string; name: string; creativeId?: string }) => Promise<{success: boolean, id?: string, error?: string}>;
+  fetchPlacementGroups: (campaignId: string) => Promise<PlacementGroupSummary[]>;
+  createPlacementPackage: (params: CreatePlacementPackageParams) => Promise<CreatePlacementPackageResult>;
   assignCreativeToAd: (creativeId: string, adId: string, campaignId?: string, mode?: 'add' | 'replace') => Promise<{success: boolean, id?: string, error?: string}>;
   unassignCreativeFromAd: (creativeId: string, adId: string, campaignId?: string, refreshAds?: boolean) => Promise<{success: boolean, error?: string}>;
   isAdsLoading: boolean;
+}
+
+export interface PlacementGroupSummary {
+  id: string;
+  name: string;
+  siteId: string;
+  placementGroupType: string;
+  childPlacementIds: string[];
+}
+
+export type PackagePricingType =
+  | 'PRICING_TYPE_CPM'
+  | 'PRICING_TYPE_CPC'
+  | 'PRICING_TYPE_CPA'
+  | 'PRICING_TYPE_FLAT_RATE_IMPRESSIONS'
+  | 'PRICING_TYPE_FLAT_RATE_CLICKS'
+  | 'PRICING_TYPE_CPM_ACTIVEVIEW';
+
+export type PackageCapCostOption = 'CAP_COST_NONE' | 'CAP_COST_MONTHLY' | 'CAP_COST_CUMULATIVE';
+
+export interface PackageFlight {
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
+  units: number;
+  rate: number;      // in account currency (converted to nanos for the API)
+}
+
+export interface CreatePlacementPackageParams {
+  campaignId: string;
+  siteId: string;
+  name: string;
+  testingStartDate?: string;
+  startDate: string;
+  endDate: string;
+  pricingType: PackagePricingType;
+  capCostOption: PackageCapCostOption;
+  automaticFlighting: boolean;
+  flights: PackageFlight[];
+  placementIds: string[];
+}
+
+export interface CreatePlacementPackageResult {
+  success: boolean;
+  id?: string;
+  error?: string;
+  assignedPlacementIds: string[];
+  failedPlacements: { id: string; error: string }[];
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -1535,6 +1584,116 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const fetchPlacementGroups = async (campaignId: string): Promise<PlacementGroupSummary[]> => {
+    if (!accessToken || !profileId || !campaignId) return [];
+    const groups: PlacementGroupSummary[] = [];
+    let pageToken: string | undefined;
+    try {
+      do {
+        const params = new URLSearchParams({ campaignIds: campaignId, maxResults: '100' });
+        if (pageToken) params.set('pageToken', pageToken);
+        const res = await fetch(`/api/cm360/userprofiles/${profileId}/placementGroups?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error?.message || `Error ${res.status}`);
+        (data.placementGroups || []).forEach((g: any) => groups.push({
+          id: String(g.id),
+          name: g.name,
+          siteId: String(g.siteId || ''),
+          placementGroupType: g.placementGroupType,
+          childPlacementIds: (g.childPlacementIds || []).map(String),
+        }));
+        pageToken = data.nextPageToken;
+      } while (pageToken);
+    } catch (e) {
+      console.error('Fetch placement groups error:', e);
+    }
+    return groups;
+  };
+
+  // Creates a CM360 placement group of type PLACEMENT_PACKAGE and then assigns each selected
+  // placement to it (placement.placementGroupId). childPlacementIds is read-only in the API,
+  // so membership can only be set from the placement side.
+  const createPlacementPackage = async (params: CreatePlacementPackageParams): Promise<CreatePlacementPackageResult> => {
+    const empty = { assignedPlacementIds: [], failedPlacements: [] };
+    if (!accessToken || !profileId) return { success: false, error: 'No connection', ...empty };
+
+    const toNanos = (value: number) => String(Math.round(value * 1e9));
+
+    const pricingSchedule: Record<string, any> = {
+      startDate: params.startDate,
+      endDate: params.endDate,
+      pricingType: params.pricingType,
+      capCostOption: params.capCostOption,
+      flighted: params.automaticFlighting,
+    };
+    if (params.testingStartDate) pricingSchedule.testingStartDate = params.testingStartDate;
+    if (!params.automaticFlighting && params.flights.length > 0) {
+      pricingSchedule.pricingPeriods = params.flights.map((flight) => ({
+        startDate: flight.startDate,
+        endDate: flight.endDate,
+        units: String(Math.max(0, Math.round(flight.units))),
+        rateOrCostNanos: toNanos(Math.max(0, flight.rate)),
+      }));
+    }
+
+    try {
+      const res = await fetch(`/api/cm360/userprofiles/${profileId}/placementGroups`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          campaignId: params.campaignId,
+          siteId: params.siteId,
+          name: params.name,
+          placementGroupType: 'PLACEMENT_PACKAGE',
+          pricingSchedule,
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.id) {
+        const detail = data?.error?.errors?.map((e: any) => e?.message).filter(Boolean).join(' | ');
+        return { success: false, error: detail || data?.error?.message || `Package creation failed (${res.status})`, ...empty };
+      }
+
+      const groupId = String(data.id);
+      const assignedPlacementIds: string[] = [];
+      const failedPlacements: { id: string; error: string }[] = [];
+
+      for (const placementId of params.placementIds) {
+        try {
+          const patchRes = await fetch(`/api/cm360/userprofiles/${profileId}/placements?id=${encodeURIComponent(placementId)}`, {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ id: placementId, placementGroupId: groupId })
+          });
+          const patchData = await patchRes.json().catch(() => ({}));
+          if (patchRes.ok) {
+            assignedPlacementIds.push(placementId);
+            setPlacements((prev) => prev.map((p) => p.id === placementId
+              ? { ...p, originalData: { ...(p.originalData || {}), placementGroupId: groupId } as any }
+              : p));
+          } else {
+            failedPlacements.push({ id: placementId, error: patchData?.error?.message || `HTTP ${patchRes.status}` });
+          }
+        } catch (e: any) {
+          failedPlacements.push({ id: placementId, error: e.message || 'Network error' });
+        }
+      }
+
+      return { success: true, id: groupId, assignedPlacementIds, failedPlacements };
+    } catch (e: any) {
+      console.error('Create placement package error:', e);
+      return { success: false, error: e.message || 'Network error', ...empty };
+    }
+  };
+
   const assignCreativeToAd = async (creativeId: string, adId: string, campaignId?: string, mode: 'add' | 'replace' = 'add') => {
     if (!accessToken || !profileId) return { success: false, error: 'No connection' };
     try {
@@ -2436,7 +2595,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setSelectedAdvertiser, setSelectedCampaign, setSelectedAd, setCurrentView, setIsGlobalSearchActive,
       addPlacements, updateCampaignDraft, updatePlacement, updatePlacementDraft, updatePlacementName, updateAdDraft, updateCreativeDraft, updateAdName, updateCreativeName, deletePlacement, publishSelectedDrafts, publishSelectedAdDrafts, publishSelectedCreativeDrafts,
       connectionStatus, isAuthenticated, accessToken, profileId, accountId, accounts, switchAccount, user, login, loginWithToken, enterDemoMode, logout,
-      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchAds, fetchCreatives, fetchAllCreatives, fetchCreativesByIds, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, pushCampaigns, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement, createAd, assignCreativeToAd, unassignCreativeFromAd, isAdsLoading
+      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchAds, fetchCreatives, fetchAllCreatives, fetchCreativesByIds, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, pushCampaigns, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement, createAd, fetchPlacementGroups, createPlacementPackage, assignCreativeToAd, unassignCreativeFromAd, isAdsLoading
     }}>
       {children}
     </AppContext.Provider>

@@ -4,6 +4,8 @@ import { useApp } from '../context/AppContext';
 import { Placement, Status } from '../types';
 import BulkNamingModal, { applyBulkNamingConfig } from './BulkNamingModal';
 import PlacementCreator from './PlacementCreator';
+import PlacementPackageModal from './PlacementPackageModal';
+import { PlacementGroupSummary } from '../context/AppContext';
 import { 
   MoreVertical, 
   Trash2, 
@@ -19,7 +21,8 @@ import {
   PlusCircle,
   RefreshCw,
   CheckCircle2,
-  ExternalLink
+  ExternalLink,
+  Package
 } from 'lucide-react';
 import Toast from './Toast';
 
@@ -41,6 +44,7 @@ const PlacementGrid: React.FC = () => {
     sites,
     fetchSites,
     fetchPlacements,
+    fetchPlacementGroups,
   } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [siteFilter, setSiteFilter] = useState('all');
@@ -57,6 +61,12 @@ const PlacementGrid: React.FC = () => {
   const [isBulkNamingOpen, setIsBulkNamingOpen] = useState(false);
   const [isBulkActionsOpen, setIsBulkActionsOpen] = useState(false);
   const [isSyncingSites, setIsSyncingSites] = useState(false);
+  const [isPackageModalOpen, setIsPackageModalOpen] = useState(false);
+  const [placementGroups, setPlacementGroups] = useState<PlacementGroupSummary[]>([]);
+  // Context functions change identity on every provider render: call them through a ref so
+  // this effect only reruns when the campaign changes (see Fase 0, C1/C2).
+  const fetchPlacementGroupsRef = useRef(fetchPlacementGroups);
+  fetchPlacementGroupsRef.current = fetchPlacementGroups;
   const defaultColumnWidths = {
     name: 360,
     site: 170,
@@ -101,6 +111,16 @@ const PlacementGrid: React.FC = () => {
 
   useEffect(() => {
     setSiteFilter('all');
+  }, [selectedCampaign?.id]);
+
+  const loadPlacementGroups = async (campaignId: string) => {
+    const groups = await fetchPlacementGroupsRef.current(campaignId);
+    setPlacementGroups(groups);
+  };
+
+  useEffect(() => {
+    setPlacementGroups([]);
+    if (selectedCampaign?.id) loadPlacementGroups(selectedCampaign.id);
   }, [selectedCampaign?.id]);
 
   // Persist column widths only when not actively dragging (mouseup triggers save)
@@ -160,6 +180,28 @@ const PlacementGrid: React.FC = () => {
         name: match?.name || `Site ${siteId}`,
       };
   }).sort((a, b) => a.name.localeCompare(b.name));
+
+  const groupNameById = new Map(placementGroups.map((g) => [g.id, g.name]));
+  const getPlacementGroupId = (p: Placement): string => {
+    const raw = (p.originalData as any)?.placementGroupId;
+    return raw ? String(raw) : '';
+  };
+
+  // Package: selected placements of the filtered Site that already exist in CM360.
+  const packageSite = siteFilter !== 'all' ? sites.find((site) => site.id === siteFilter) || null : null;
+  const packageCandidates = filteredPlacements.filter((p) => selectedRows.has(p.id) && p.siteId === siteFilter);
+  const packagePlacements = packageCandidates.filter((p) => !!(p as Placement & { cmId?: string }).cmId && !placementsDrafts[p.id]?.isDraft);
+  const packageDisabledReason = !selectedCampaign
+    ? 'Selecciona una campaña'
+    : siteFilter === 'all'
+      ? 'Filtra primero por un Site ("Filter by Site")'
+      : !packageSite
+        ? 'El Site filtrado no está en el catálogo de sites; pulsa Sync'
+        : packagePlacements.length === 0
+          ? 'Selecciona placements ya publicados en CM360 de este Site'
+          : packageCandidates.length > packagePlacements.length
+            ? `Se incluirán ${packagePlacements.length} placements (${packageCandidates.length - packagePlacements.length} con borradores o sin publicar quedan fuera)`
+            : `Crear package con ${packagePlacements.length} placements`;
 
   const handleSyncSites = async () => {
     if (!selectedCampaign) return;
@@ -461,6 +503,15 @@ const PlacementGrid: React.FC = () => {
             {toast.type === 'loading' && toast.show ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
             Push to CM360 ({selectedRows.size})
           </button>
+          <button
+            onClick={() => setIsPackageModalOpen(true)}
+            disabled={!selectedCampaign || !packageSite || packagePlacements.length === 0}
+            title={packageDisabledReason}
+            className="flex items-center gap-2 px-4 py-2.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 rounded-lg text-sm font-semibold transition-all border border-orange-500/30 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
+          >
+            <Package className="w-4 h-4" />
+            Package{packagePlacements.length > 0 && packageSite ? ` (${packagePlacements.length})` : ''}
+          </button>
           <button 
             onClick={() => setIsCreatorOpen(true)}
             disabled={!selectedCampaign}
@@ -601,6 +652,14 @@ const PlacementGrid: React.FC = () => {
                       setEditValue(p.name);
                     }}>
                       <span className="truncate" style={{ maxWidth: `${Math.max(180, columnWidths.name - 72)}px` }}>{p.name}</span>
+                      {getPlacementGroupId(p) && (
+                        <span
+                          className="shrink-0 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-orange-500/15 border border-orange-500/30 text-orange-300 font-bold"
+                          title={`Package: ${groupNameById.get(getPlacementGroupId(p)) || getPlacementGroupId(p)}`}
+                        >
+                          <Package className="w-3 h-3" /> PKG
+                        </span>
+                      )}
                       <Edit3 className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
                   )}
@@ -769,6 +828,20 @@ const PlacementGrid: React.FC = () => {
         </table>
         </div>
       </div>
+
+      {isPackageModalOpen && selectedCampaign && packageSite && (
+        <PlacementPackageModal
+          campaign={selectedCampaign}
+          site={packageSite}
+          placements={packagePlacements}
+          groupNameById={groupNameById}
+          onClose={() => setIsPackageModalOpen(false)}
+          onCreated={() => {
+            loadPlacementGroups(selectedCampaign.id);
+            setSelectedRows(new Set());
+          }}
+        />
+      )}
 
       {isCreatorOpen && (
         <PlacementCreator onClose={() => setIsCreatorOpen(false)} />
