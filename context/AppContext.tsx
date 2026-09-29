@@ -1236,6 +1236,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return {
           id: ad.id,
           name: ad.name || `Ad_${ad.id}`,
+          type: ad.type,
           campaignId: ad.campaignId,
           active,
           status: active ? 'Active' : 'Paused',

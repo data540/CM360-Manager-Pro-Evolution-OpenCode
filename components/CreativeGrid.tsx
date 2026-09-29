@@ -156,8 +156,29 @@ const CreativeGrid: React.FC = () => {
     status: 'assigned' | 'uploaded_only' | 'skipped' | 'assign_failed' | 'upload_failed';
     detail: string;
     link: string | null;
+    defaultInfo?: { ok: boolean; text: string };
   };
   const [batchReport, setBatchReport] = useState<BatchReportRow[] | null>(null);
+
+  // Batch Upload -> Default Ads. Most batches replace the Default Ad creative of each size,
+  // so the option is on by default and the choice is remembered per browser.
+  const [assignToDefaultAds, setAssignToDefaultAds] = useState<boolean>(() => {
+    try { return localStorage.getItem('cm360_batch_default_ads') !== 'false'; } catch { return true; }
+  });
+  const [defaultAssignMode, setDefaultAssignMode] = useState<'replace' | 'add'>('replace');
+  type DefaultPlanEntry = { size: string; files: Array<{ fileId: string; name: string; setKey: string }>; defaultAds: Ad[] };
+  const [defaultChoice, setDefaultChoice] = useState<{
+    entries: DefaultPlanEntry[];
+    sets: Array<{ key: string; sizes: string[] }>;
+    selection: Record<string, string>;
+    selectedSetKey: string;
+  } | null>(null);
+  // size -> fileId chosen as default ('' = no default for that size). null = not resolved yet.
+  const defaultSelectionRef = React.useRef<Record<string, string> | null>(null);
+
+  useEffect(() => {
+    try { localStorage.setItem('cm360_batch_default_ads', String(assignToDefaultAds)); } catch { /* ignore */ }
+  }, [assignToDefaultAds]);
   const [listColumnWidths, setListColumnWidths] = useState({
     preview: 110,
     name: 420,
@@ -167,7 +188,7 @@ const CreativeGrid: React.FC = () => {
     assignment: 170,
   });
 
-  const isDefaultAd = (ad: Ad) => /default/i.test(ad.name || '');
+  const isDefaultAd = (ad: Ad) => ad.type === 'AD_SERVING_DEFAULT_AD' || /default/i.test(ad.name || '');
 
   const campaignAds = selectedCampaign
     ? ads.filter((ad) => ad.campaignId === selectedCampaign.id)
@@ -348,6 +369,64 @@ const CreativeGrid: React.FC = () => {
     return map;
   };
 
+  const getDefaultAdsBySize = (): Map<string, Ad[]> => {
+    const map = new Map<string, Ad[]>();
+    getAdsBySize().forEach((adsForSize, size) => {
+      const defaults = adsForSize.filter(isDefaultAd);
+      if (defaults.length > 0) map.set(size, defaults);
+    });
+    return map;
+  };
+
+  const getFileId = (file: File) => `${file.name}|${file.size}|${file.lastModified}`;
+
+  // A "set" (juego) groups files that share the same name once the size token is removed,
+  // e.g. ae-es_nuevasrutas_300x250_okdiario and ae-es_nuevasrutas_300x600_okdiario.
+  const getCreativeSetKey = (fileName: string) => {
+    const base = getFileNameWithoutExtension(fileName)
+      .replace(/\d+\s*[x×]\s*\d+/gi, '')
+      .replace(/[\s_.-]{2,}/g, '_')
+      .replace(/^[\s_.-]+|[\s_.-]+$/g, '');
+    return base || fileName;
+  };
+
+  const selectDefaultsForSet = (entries: DefaultPlanEntry[], setKey: string, current: Record<string, string>) => {
+    const next: Record<string, string> = { ...current };
+    entries.forEach((entry) => {
+      const fromSet = entry.files.find((f) => f.setKey === setKey);
+      if (fromSet) next[entry.size] = fromSet.fileId;
+      else if (!(entry.size in next)) next[entry.size] = entry.files.length === 1 ? entry.files[0].fileId : '';
+    });
+    return next;
+  };
+
+  const buildDefaultPlan = async (files: File[]) => {
+    const defaultAdsBySize = getDefaultAdsBySize();
+    const bySize = new Map<string, DefaultPlanEntry>();
+    for (const file of files) {
+      const { finalSize } = await resolveFileSize(file);
+      if (!bySize.has(finalSize)) {
+        bySize.set(finalSize, { size: finalSize, files: [], defaultAds: defaultAdsBySize.get(finalSize) || [] });
+      }
+      bySize.get(finalSize)!.files.push({ fileId: getFileId(file), name: file.name, setKey: getCreativeSetKey(file.name) });
+    }
+    const entries = Array.from(bySize.values()).sort((a, b) => a.size.localeCompare(b.size, undefined, { numeric: true }));
+
+    const setSizes = new Map<string, string[]>();
+    entries.forEach((entry) => entry.files.forEach((f) => {
+      if (!setSizes.has(f.setKey)) setSizes.set(f.setKey, []);
+      if (!setSizes.get(f.setKey)!.includes(entry.size)) setSizes.get(f.setKey)!.push(entry.size);
+    }));
+    const sets = Array.from(setSizes.entries())
+      .map(([key, sizes]) => ({ key, sizes }))
+      .sort((a, b) => b.sizes.length - a.sizes.length || a.key.localeCompare(b.key));
+
+    const selectedSetKey = sets[0]?.key || '';
+    const selection = selectDefaultsForSet(entries, selectedSetKey, {});
+    const needsChoice = entries.some((entry) => entry.files.length > 1 && entry.defaultAds.length > 0);
+    return { entries, sets, selection, selectedSetKey, needsChoice };
+  };
+
   const resolveFileSize = async (file: File): Promise<{ sizeFromName: string | null; sizeFromFile: string | null; mismatch: boolean; finalSize: string }> => {
     const sizeFromName = normalizeSize(extractSizeFromName(file.name));
     const sizeFromFile = normalizeSize(await getImageSize(file));
@@ -426,6 +505,9 @@ const CreativeGrid: React.FC = () => {
     setBatchProgress({ current: 0, total: plans.length, status: 'Starting batch upload...' });
 
     const reportRows: BatchReportRow[] = [];
+    const uploadedIdByFileId: Record<string, string> = {};
+    const reportRowByFileId: Record<string, BatchReportRow> = {};
+    const defaultSelection = defaultSelectionRef.current;
 
     for (let i = 0; i < plans.length; i++) {
       const plan = plans[i];
@@ -457,6 +539,8 @@ const CreativeGrid: React.FC = () => {
         });
         continue;
       }
+
+      if (result.id) uploadedIdByFileId[getFileId(plan.file)] = result.id;
 
       const creativeLink = result.id
         ? `https://campaignmanager.google.com/trafficking/#/accounts/${accountId}/advertisers/${selectedAdvertiser.id}/creatives/${result.id}`
@@ -530,6 +614,52 @@ const CreativeGrid: React.FC = () => {
       }
     }
 
+    // Exactly one report row is pushed per plan, in order, so index i matches plans[i].
+    plans.forEach((plan, idx) => { if (reportRows[idx]) reportRowByFileId[getFileId(plan.file)] = reportRows[idx]; });
+
+    if (defaultSelection && selectedCampaign) {
+      const defaultAdsBySize = getDefaultAdsBySize();
+      const sizesToAssign = (Object.entries(defaultSelection) as Array<[string, string]>).filter(([, fileId]) => !!fileId);
+      const totalAssignments = sizesToAssign.reduce((acc, [size]) => acc + (defaultAdsBySize.get(size)?.length || 0), 0);
+      let done = 0;
+
+      for (const [size, fileId] of sizesToAssign) {
+        const row = reportRowByFileId[fileId];
+        const creativeId = uploadedIdByFileId[fileId];
+        const defaultAds = defaultAdsBySize.get(size) || [];
+        if (!row) continue;
+        if (!creativeId) {
+          row.defaultInfo = { ok: false, text: 'Default no asignado: la subida falló.' };
+          continue;
+        }
+        if (defaultAds.length === 0) {
+          row.defaultInfo = { ok: false, text: `No hay Default Ads de ${size} en los Sites seleccionados.` };
+          continue;
+        }
+
+        const failed: string[] = [];
+        for (const ad of defaultAds) {
+          done++;
+          setBatchProgress({ current: done, total: Math.max(totalAssignments, 1), status: `Default ${size}: ${ad.name}` });
+          const assignResult = await assignCreativeToAd(creativeId, ad.id, selectedCampaign.id, defaultAssignMode);
+          if (!assignResult.success) failed.push(`${ad.name} (${assignResult.error || 'error'})`);
+        }
+        const okCount = defaultAds.length - failed.length;
+        row.defaultInfo = failed.length === 0
+          ? { ok: true, text: `Default en ${okCount} Default Ad(s) de ${size} (${defaultAssignMode === 'replace' ? 'sustituye la anterior' : 'añadida'}).` }
+          : { ok: false, text: `Default en ${okCount}/${defaultAds.length} Default Ads. Fallos: ${failed.join('; ')}` };
+      }
+
+      // Files that competed for a size but were not picked as default.
+      plans.forEach((plan) => {
+        const row = reportRowByFileId[getFileId(plan.file)];
+        if (row && !row.defaultInfo && defaultSelection[plan.finalSize] !== undefined && (defaultAdsBySize.get(plan.finalSize)?.length || 0) > 0) {
+          row.defaultInfo = { ok: true, text: 'No elegida como default para este tamaño.' };
+        }
+      });
+    }
+    defaultSelectionRef.current = null;
+
     setBatchProgress(null);
     setPendingFiles([]);
     setBatchPlans([]);
@@ -545,6 +675,8 @@ const CreativeGrid: React.FC = () => {
     setManualPlanIndex(null);
     setApplyManualSelectionToSameSize(true);
     setBatchReport(null);
+    defaultSelectionRef.current = null;
+    setDefaultChoice(null);
 
     if (isBatch || files.length > 1) {
       setPendingFiles(files);
@@ -651,6 +783,15 @@ const CreativeGrid: React.FC = () => {
     }
 
     if (pendingFiles.length > 0) {
+      if (assignToDefaultAds && selectedCampaign && defaultSelectionRef.current === null) {
+        const plan = await buildDefaultPlan(pendingFiles);
+        if (plan.needsChoice) {
+          setDefaultChoice({ entries: plan.entries, sets: plan.sets, selection: plan.selection, selectedSetKey: plan.selectedSetKey });
+          return;
+        }
+        defaultSelectionRef.current = plan.selection;
+      }
+
       if (batchAssignmentMode === 'auto') {
         const plans = await resolveBatchPlans(pendingFiles);
         setBatchPlans(plans);
@@ -2341,6 +2482,37 @@ const CreativeGrid: React.FC = () => {
                 )}
               </div>
 
+              {pendingFiles.length > 0 && (
+                <div className={`p-4 rounded-2xl border space-y-3 ${assignToDefaultAds && selectedCampaign ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-slate-950 border-slate-800'}`}>
+                  <label className={`flex items-start gap-3 ${selectedCampaign ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+                    <input
+                      type="checkbox"
+                      className="accent-emerald-500 mt-0.5 w-4 h-4"
+                      checked={assignToDefaultAds && !!selectedCampaign}
+                      disabled={!selectedCampaign}
+                      onChange={(e) => setAssignToDefaultAds(e.target.checked)}
+                    />
+                    <span>
+                      <span className="block text-xs font-bold text-slate-200">Poner como Default</span>
+                      <span className="block text-[10px] text-slate-400 mt-0.5">
+                        Asigna cada creatividad subida a los Default Ads de su mismo tamaño (en los Sites seleccionados).
+                        Si hay varios juegos del mismo tamaño, te preguntaré cuál poner como default.
+                      </span>
+                    </span>
+                  </label>
+                  {assignToDefaultAds && selectedCampaign && (
+                    <select
+                      value={defaultAssignMode}
+                      onChange={(e) => setDefaultAssignMode(e.target.value as 'replace' | 'add')}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="replace">Sustituir la creatividad actual del Default Ad</option>
+                      <option value="add">Añadir junto a las creatividades actuales del Default Ad</option>
+                    </select>
+                  )}
+                </div>
+              )}
+
               {pendingFiles.length === 0 && (
                 <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 mt-4">
                   <label className="block text-[9px] uppercase font-bold text-slate-600 mb-1">Final Name Preview</label>
@@ -2365,6 +2537,8 @@ const CreativeGrid: React.FC = () => {
                     setBatchPlans([]);
                     setManualPlanIndex(null);
                     setApplyManualSelectionToSameSize(true);
+                    defaultSelectionRef.current = null;
+                    setDefaultChoice(null);
                   }}
                   className="flex-1 py-3 text-slate-400 hover:text-white font-bold transition-all"
                 >
@@ -2377,6 +2551,97 @@ const CreativeGrid: React.FC = () => {
                   {pendingFiles.length > 0 ? 'Start Batch' : 'Confirm & Upload'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {defaultChoice && (
+        <div className="fixed inset-0 z-[120] flex items-start sm:items-center justify-center p-4 overflow-y-auto bg-slate-950/85 backdrop-blur-sm">
+          <div className="my-4 bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto custom-scrollbar shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-bold text-white mb-2">¿Qué juego pongo como default?</h3>
+            <p className="text-slate-400 text-sm mb-5">
+              Hay varios juegos de creatividades con el mismo tamaño. Elige el juego que irá a los Default Ads;
+              puedes ajustar tamaño a tamaño más abajo.
+            </p>
+
+            <div className="space-y-2 mb-6">
+              {defaultChoice.sets.map((set) => {
+                const checked = defaultChoice.selectedSetKey === set.key;
+                return (
+                  <label
+                    key={set.key}
+                    className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${checked ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-slate-800 bg-slate-950 hover:border-slate-700'}`}
+                  >
+                    <input
+                      type="radio"
+                      name="default-set"
+                      className="accent-emerald-500 mt-1"
+                      checked={checked}
+                      onChange={() => setDefaultChoice((prev) => prev && ({
+                        ...prev,
+                        selectedSetKey: set.key,
+                        selection: selectDefaultsForSet(prev.entries, set.key, prev.selection),
+                      }))}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-slate-100 break-words">{set.key}</span>
+                      <span className="flex flex-wrap gap-1 mt-1.5">
+                        {set.sizes.map((size) => (
+                          <span key={size} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">{size}</span>
+                        ))}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="border border-slate-800 rounded-xl overflow-hidden">
+              <div className="grid grid-cols-[90px_110px_1fr] gap-3 px-3 py-2 bg-slate-950 text-[10px] uppercase font-bold tracking-wider text-slate-500">
+                <span>Tamaño</span><span>Default Ads</span><span>Creatividad default</span>
+              </div>
+              {defaultChoice.entries.map((entry) => (
+                <div key={entry.size} className="grid grid-cols-[90px_110px_1fr] gap-3 px-3 py-2 border-t border-slate-800 items-center">
+                  <span className="text-xs font-mono text-slate-200">{entry.size}</span>
+                  <span className={`text-xs ${entry.defaultAds.length > 0 ? 'text-slate-300' : 'text-slate-600'}`}>
+                    {entry.defaultAds.length > 0 ? `${entry.defaultAds.length} Default Ad(s)` : 'Ninguno'}
+                  </span>
+                  <select
+                    value={defaultChoice.selection[entry.size] || ''}
+                    disabled={entry.defaultAds.length === 0}
+                    onChange={(e) => setDefaultChoice((prev) => prev && ({
+                      ...prev,
+                      selection: { ...prev.selection, [entry.size]: e.target.value },
+                    }))}
+                    className="w-full min-w-0 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 disabled:opacity-40"
+                  >
+                    <option value="">— Sin default —</option>
+                    {entry.files.map((f) => (
+                      <option key={f.fileId} value={f.fileId}>{f.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-3 pt-6">
+              <button
+                onClick={() => setDefaultChoice(null)}
+                className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
+              >
+                Volver
+              </button>
+              <button
+                onClick={() => {
+                  defaultSelectionRef.current = defaultChoice.selection;
+                  setDefaultChoice(null);
+                  confirmUpload();
+                }}
+                className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all"
+              >
+                Continuar con la subida
+              </button>
             </div>
           </div>
         </div>
@@ -2538,6 +2803,11 @@ const CreativeGrid: React.FC = () => {
                       )}
                     </p>
                     <p className="text-[10px] text-slate-500 mt-1">{row.detail}</p>
+                    {row.defaultInfo && (
+                      <p className={`text-[10px] mt-1 font-semibold ${row.defaultInfo.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        Default: {row.defaultInfo.text}
+                      </p>
+                    )}
                     {row.link && (
                       <a href={row.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 mt-1">
                         View in CM360 <ExternalLink size={10} />

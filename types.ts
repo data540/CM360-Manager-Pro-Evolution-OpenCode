@@ -70,6 +70,7 @@ export interface Creative {
 export interface Ad {
   id: string;
   name: string;
+  type?: string; // CM360 ad type, e.g. AD_SERVING_STANDARD_AD, AD_SERVING_DEFAULT_AD
   campaignId: string;
   active: boolean;
   status: Status;
