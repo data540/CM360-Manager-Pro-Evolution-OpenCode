@@ -93,17 +93,40 @@ test('no matching IO is an error and skips missing-placement noise', () => {
 
 test('prs placement in an rtg IO is a strategy mismatch, reported once across line items', () => {
   const result = auditCampaign(baseInput({
-    campaignPlacements: [AUDEXT_DESKTOP],
     insertionOrders: [RTG_DESKTOP_IO],
     lineItems: [
-      lineItem('10', RTG_DESKTOP_IO, 'addtocart_<3D', ['c2']),
-      lineItem('11', RTG_DESKTOP_IO, 'profundidad', ['c2']),
+      lineItem('10', RTG_DESKTOP_IO, 'addtocart_<3D', ['c1']),
+      lineItem('11', RTG_DESKTOP_IO, 'profundidad', ['c1']),
     ],
-    creatives: [creativeFor(AUDEXT_DESKTOP, 'c2')],
   }));
   assert.equal(result.issues.length, 1);
   assert.equal(result.issues[0].code, 'strategy_mismatch');
   assert.deepEqual(result.issues[0].lineItemIds, ['10', '11']);
+});
+
+test('audience-extension placement counts as rtg even when named prs', () => {
+  const inRtg = baseInput({
+    campaignPlacements: [AUDEXT_DESKTOP],
+    insertionOrders: [RTG_DESKTOP_IO],
+    lineItems: [lineItem('10', RTG_DESKTOP_IO, 'addtocart_<3D', ['c2'])],
+    creatives: [creativeFor(AUDEXT_DESKTOP, 'c2')],
+  });
+  assert.deepEqual(codes(inRtg), []);
+
+  const inPrs = baseInput({
+    campaignPlacements: [AUDEXT_DESKTOP],
+    lineItems: [lineItem('1', PRS_DESKTOP_IO, 'affinity', ['c2'])],
+    creatives: [creativeFor(AUDEXT_DESKTOP, 'c2')],
+  });
+  assert.deepEqual(codes(inPrs), ['strategy_mismatch']);
+
+  const regional = placement('452528255', 'ae-ch_kpi360_ao_2026_dis_prs_dv360_desktop_audience-extension-johannesburgo_970x250');
+  assert.deepEqual(codes(baseInput({
+    campaignPlacements: [regional],
+    insertionOrders: [RTG_DESKTOP_IO],
+    lineItems: [lineItem('10', RTG_DESKTOP_IO, 'addtocart_<3D', ['c3'])],
+    creatives: [creativeFor(regional, 'c3')],
+  })), []);
 });
 
 test('mobile placement in a desktop line item is a device mismatch', () => {

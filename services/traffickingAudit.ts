@@ -132,6 +132,10 @@ const strategyOf = (campaignName: string, name: string): string | undefined => {
   return first && STRATEGY_TOKENS.includes(first) ? first : undefined;
 };
 
+/** Audience-extension placements are retargeting even when their name says `prs`. */
+const placementStrategyOf = (campaignName: string, name: string): string | undefined =>
+  nameTokens(name).some((t) => t.startsWith('audience-extension')) ? 'rtg' : strategyOf(campaignName, name);
+
 const deviceOf = (campaignName: string, name: string): string | undefined =>
   tokensAfterCampaign(campaignName, name).find((t) => DEVICE_TOKENS.includes(t));
 
@@ -299,7 +303,7 @@ export const auditCampaign = (input: AuditInput): AuditResult => {
       }
 
       const ioStrategy = strategyOf(campaign.name, io.displayName);
-      const placementStrategy = strategyOf(campaign.name, placement.name);
+      const placementStrategy = placementStrategyOf(campaign.name, placement.name);
       if (ioStrategy && placementStrategy && ioStrategy !== placementStrategy) {
         addIssue(key('strategy_mismatch'), {
           severity: 'error',
