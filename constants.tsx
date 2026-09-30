@@ -1,6 +1,17 @@
 
 import { Advertiser, Campaign, Site, Placement, Creative } from './types';
 
+export const DEFAULT_CLIENT_ID = "547547481261-0o6coge0fufp839q33ekv7hk1930m7o1.apps.googleusercontent.com";
+
+/** OAuth client used for Google sign-in: a custom one saved in Settings, or the default. */
+export const getGoogleClientId = (): string => {
+  try {
+    return localStorage.getItem('cm360_custom_client_id') || DEFAULT_CLIENT_ID;
+  } catch {
+    return DEFAULT_CLIENT_ID;
+  }
+};
+
 export const MOCK_ADVERTISERS: Advertiser[] = [
   { id: 'adv-1', name: 'Global Tech Corp' },
   { id: 'adv-2', name: 'Luxury Fashion Group' },

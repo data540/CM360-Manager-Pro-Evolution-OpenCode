@@ -88,6 +88,10 @@ async function startServer() {
     proxyRequest(req, res, "https://www.googleapis.com", "/api/google"),
   );
 
+  app.use("/api/dv360", (req, res) =>
+    proxyRequest(req, res, "https://displayvideo.googleapis.com/v4", "/api/dv360"),
+  );
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

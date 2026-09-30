@@ -96,4 +96,4 @@ export interface BatchItem {
   errors: string[];
 }
 
-export type ViewType = 'Campaigns' | 'Placements' | 'Ads' | 'Creatives' | 'AIHelper' | 'Settings';
+export type ViewType = 'Campaigns' | 'Placements' | 'Ads' | 'Creatives' | 'Audit' | 'AIHelper' | 'Settings';

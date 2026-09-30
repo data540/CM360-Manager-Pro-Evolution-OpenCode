@@ -16,6 +16,10 @@
       "destination": "https://www.googleapis.com/:path*"
     },
     {
+      "source": "/api/dv360/:path*",
+      "destination": "https://displayvideo.googleapis.com/v4/:path*"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }

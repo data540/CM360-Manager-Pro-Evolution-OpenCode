@@ -12,7 +12,8 @@ import {
   Circle,
   Database,
   RefreshCw,
-  Plus
+  Plus,
+  ShieldCheck
 } from 'lucide-react';
 import Toast from './Toast';
 
@@ -122,6 +123,7 @@ const Sidebar: React.FC = () => {
     { type: 'Placements', icon: Layers, label: 'Placements' },
     { type: 'Ads', icon: Megaphone, label: 'Ads' },
     { type: 'Creatives', icon: ImageIcon, label: 'Creatives' },
+    { type: 'Audit', icon: ShieldCheck, label: 'Audit DV360' },
     { type: 'Settings', icon: SettingsIcon, label: 'Settings' },
   ];
 

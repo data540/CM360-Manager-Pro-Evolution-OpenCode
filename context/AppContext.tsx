@@ -1,7 +1,7 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { Advertiser, Campaign, Placement, Creative, Ad, ViewType, Site, Status } from '../types';
-import { MOCK_ADVERTISERS, MOCK_CAMPAIGNS, MOCK_PLACEMENTS, MOCK_CREATIVES, MOCK_SITES, getForcedDefaultAdLanding } from '../constants';
+import { MOCK_ADVERTISERS, MOCK_CAMPAIGNS, MOCK_PLACEMENTS, MOCK_CREATIVES, MOCK_SITES, getForcedDefaultAdLanding, DEFAULT_CLIENT_ID } from '../constants';
 
 interface UserProfile {
   name: string;
@@ -141,7 +141,6 @@ export interface CreatePlacementPackageResult {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-const DEFAULT_CLIENT_ID = "547547481261-0o6coge0fufp839q33ekv7hk1930m7o1.apps.googleusercontent.com";
 const CM360_SCOPES = "https://www.googleapis.com/auth/dfareporting https://www.googleapis.com/auth/dfatrafficking openid https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email";
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
