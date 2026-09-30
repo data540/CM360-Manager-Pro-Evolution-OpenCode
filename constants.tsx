@@ -110,3 +110,14 @@ export const CM360_ERROR_MAPPING: Record<string, { title: string, description: s
     description: 'Ha ocurrido un problema inesperado en la API de Campaign Manager.'
   }
 };
+
+// Default Ads of these advertisers always point to a fixed landing page. Applied whenever
+// the app writes creative assignments on a Default Ad (batch upload, bulk edit).
+export const DEFAULT_AD_LANDING_RULES: { advertiserPattern: RegExp; url: string }[] = [
+  { advertiserPattern: /air\s*europa/i, url: 'https://www.aireuropa.com/' },
+];
+
+export const getForcedDefaultAdLanding = (advertiserName?: string | null): string | null => {
+  if (!advertiserName) return null;
+  return DEFAULT_AD_LANDING_RULES.find((rule) => rule.advertiserPattern.test(advertiserName))?.url || null;
+};

@@ -2143,6 +2143,7 @@ const CreativeGrid: React.FC = () => {
       {isBulkEditPanelOpen && (
         <CreativeBulkEditPanel
           initialSelectedCreativeIds={bulkEditInitialIds}
+          initialSiteIds={Array.from(appliedSiteFilterIds)}
           onClose={() => {
             setIsBulkEditPanelOpen(false);
             setBulkEditInitialIds(undefined);

@@ -1,7 +1,7 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { Advertiser, Campaign, Placement, Creative, Ad, ViewType, Site, Status } from '../types';
-import { MOCK_ADVERTISERS, MOCK_CAMPAIGNS, MOCK_PLACEMENTS, MOCK_CREATIVES, MOCK_SITES } from '../constants';
+import { MOCK_ADVERTISERS, MOCK_CAMPAIGNS, MOCK_PLACEMENTS, MOCK_CREATIVES, MOCK_SITES, getForcedDefaultAdLanding } from '../constants';
 
 interface UserProfile {
   name: string;
@@ -1785,11 +1785,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       };
 
       const replacementAssignment = buildNewAssignmentFromTemplate();
-      const nextAssignments = mode === 'replace'
+      const baseNextAssignments = mode === 'replace'
         ? [replacementAssignment]
         : (alreadyAssigned
           ? normalizedAssignments
           : [...normalizedAssignments, replacementAssignment]);
+
+      // Default Ads of some advertisers (e.g. Air Europa) must always use a fixed landing.
+      const adAdvertiserName = advertisers.find((a) => String(a.id) === String(adData.advertiserId))?.name || selectedAdvertiser?.name;
+      const forcedDefaultLanding = adData.type === 'AD_SERVING_DEFAULT_AD' ? getForcedDefaultAdLanding(adAdvertiserName) : null;
+      const nextAssignments = forcedDefaultLanding
+        ? baseNextAssignments.map((item: any) => ({
+            ...item,
+            clickThroughUrl: { defaultLandingPage: false, customClickThroughUrl: forcedDefaultLanding },
+          }))
+        : baseNextAssignments;
 
       const patchPayload = adData?.creativeRotation
         ? {
@@ -2194,17 +2204,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       try {
         const nextName = typeof draft.name === 'string' ? draft.name : creative.name;
         const nextActive = typeof draft.active === 'boolean' ? draft.active : creative.active;
-        const hasDraftLandingPageId = Object.prototype.hasOwnProperty.call(draft, 'landingPageId');
-        const hasDraftLandingPageUrl = Object.prototype.hasOwnProperty.call(draft, 'landingPageUrl');
-        const nextLandingPageId = hasDraftLandingPageId ? draft.landingPageId : creative.landingPageId;
-        const nextLandingPageUrl = hasDraftLandingPageUrl ? draft.landingPageUrl : creative.landingPageUrl;
+        const landingBySite = draft.landingBySite && Object.keys(draft.landingBySite).length > 0 ? draft.landingBySite : null;
         const nextEndDate = typeof draft.endDate === 'string' ? draft.endDate : creative.endDate;
         const nextStartDate = typeof draft.startDate === 'string' ? draft.startDate : creative.startDate;
         const nextStartTime = typeof draft.startTime === 'string' ? draft.startTime : (creative.startTime || '00:00');
 
         const changedName = nextName !== creative.name;
         const changedActive = nextActive !== creative.active;
-        const changedLanding = nextLandingPageId !== creative.landingPageId || nextLandingPageUrl !== creative.landingPageUrl;
+        const changedLanding = !!landingBySite;
         const changedEndDate = typeof draft.endDate === 'string' && draft.endDate !== creative.endDate;
         const changedStartDate = !!nextStartDate && (
           (typeof draft.startDate === 'string' && draft.startDate !== creative.startDate)
@@ -2271,17 +2278,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         }
 
-        if (changedLanding) {
-          const clickThroughUrl = nextLandingPageId
-            ? { defaultLandingPage: false, landingPageId: nextLandingPageId }
-            : nextLandingPageUrl
-              ? { defaultLandingPage: false, customClickThroughUrl: nextLandingPageUrl }
-              : null;
-
-          if (!clickThroughUrl) {
-            landingPatchSuccess = false;
-            lastError = 'No landing page or custom URL was provided.';
-          } else {
+        if (changedLanding && landingBySite) {
+          {
             const linkedAds: any[] = [];
             let pageToken: string | undefined;
 
@@ -2305,9 +2303,52 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               landingPatchSuccess = false;
               if (!lastError) lastError = 'No Ads are linked to this creative. Landing pages are applied to Creative assignments in CM360.';
             } else {
+              // Resolve the Site of every placement used by the linked Ads (state first, then API).
+              const placementSite = new Map<string, string>(placements.map((p) => [String(p.id), String(p.siteId)]));
+              const missingPlacementIds = Array.from(new Set(linkedAds.flatMap((ad: any) =>
+                (ad.placementAssignments || []).map((pa: any) => String(pa.placementId)))))
+                .filter((pid) => pid && !placementSite.has(pid));
+              for (let offset = 0; offset < missingPlacementIds.length; offset += 50) {
+                const params = new URLSearchParams({ maxResults: '100' });
+                missingPlacementIds.slice(offset, offset + 50).forEach((pid) => params.append('ids', pid));
+                const plRes = await fetch(`/api/cm360/userprofiles/${profileId}/placements?${params.toString()}`, {
+                  headers: { Authorization: `Bearer ${accessToken}` }
+                });
+                const plData = await plRes.json().catch(() => ({}));
+                (plData.placements || []).forEach((p: any) => placementSite.set(String(p.id), String(p.siteId)));
+              }
+
+              const creativeAdvertiserName = selectedAdvertiser?.name;
+              const forcedDefaultLanding = getForcedDefaultAdLanding(creativeAdvertiserName);
+              const conflicts: string[] = [];
+              let touchedAds = 0;
               landingPatchSuccess = true;
 
               for (const linkedAd of linkedAds) {
+                const adSiteIds = Array.from(new Set((linkedAd.placementAssignments || [])
+                  .map((pa: any) => placementSite.get(String(pa.placementId)))
+                  .filter(Boolean))) as string[];
+                const editedSiteIds = adSiteIds.filter((siteId) => !!landingBySite[siteId]);
+                // Ads that only serve on Sites not being edited keep their current landing.
+                if (editedSiteIds.length === 0) continue;
+
+                let target: { landingPageId?: string; url?: string };
+                if (linkedAd.type === 'AD_SERVING_DEFAULT_AD' && forcedDefaultLanding) {
+                  target = { url: forcedDefaultLanding };
+                } else {
+                  const distinctTargets = new Set(editedSiteIds.map((siteId) => JSON.stringify(landingBySite[siteId])));
+                  if (distinctTargets.size > 1 || editedSiteIds.length < adSiteIds.length) {
+                    // One Ad assignment has a single landing: it cannot differ per Site inside the same Ad.
+                    conflicts.push(linkedAd.name || linkedAd.id);
+                    continue;
+                  }
+                  target = landingBySite[editedSiteIds[0]];
+                }
+
+                const clickThroughUrl = target.landingPageId
+                  ? { defaultLandingPage: false, landingPageId: target.landingPageId }
+                  : { defaultLandingPage: false, customClickThroughUrl: target.url };
+
                 const rotation = linkedAd.creativeRotation;
                 const assignments = Array.isArray(rotation?.creativeAssignments) ? rotation.creativeAssignments : [];
                 let matchedAssignment = false;
@@ -2318,6 +2359,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 });
 
                 if (!matchedAssignment) continue;
+                touchedAds++;
 
                 const adRes = await fetch(
                   `/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(linkedAd.id)}`,
@@ -2340,6 +2382,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                   lastError = adData?.error?.message || `Landing page update failed for Ad ${linkedAd.id} (${adRes.status}: ${adRes.statusText})`;
                   break;
                 }
+              }
+
+              if (landingPatchSuccess && conflicts.length > 0) {
+                landingPatchSuccess = false;
+                lastError = `Landing no aplicada en ${conflicts.length} Ad(s) que sirven en varios Sites con landings distintas o no editados: ${conflicts.join(', ')}.`;
+              } else if (landingPatchSuccess && touchedAds === 0) {
+                landingPatchSuccess = false;
+                lastError = 'La creatividad no tiene Ads en los Sites seleccionados.';
               }
             }
           }
@@ -2455,10 +2505,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             ...c,
             ...(changedName ? { name: nextName } : {}),
             ...(changedActive ? { active: nextActive, status: nextActive ? 'Active' : 'Paused' } : {}),
-            ...(changedLanding ? {
-              landingPageId: nextLandingPageId,
-              landingPageUrl: nextLandingPageUrl,
-            } : {}),
             ...(changedEndDate ? { endDate: nextEndDate } : {}),
             ...(changedStartDate ? { startDate: nextStartDate, startTime: nextStartTime } : {}),
             isDraft: false,

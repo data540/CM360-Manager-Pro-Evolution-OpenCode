@@ -63,6 +63,9 @@ export interface Creative {
   externalUrl?: string;
   landingPageId?: string;
   landingPageUrl?: string;
+  // Draft-only: landing to apply per Site (siteId -> landing). Only the creative's
+  // assignments in Ads of those Sites are changed; other Sites keep their landing.
+  landingBySite?: Record<string, { landingPageId?: string; url?: string }>;
   isDraft?: boolean;
   originalData?: Partial<Creative>;
 }

@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext';
 import { Campaign, Creative, Site } from '../types';
 import { X, Search, ChevronLeft, ChevronsRight, Loader2, CheckSquare } from 'lucide-react';
 import { applyBulkNamingConfig, BulkNamingConfig } from './BulkNamingModal';
+import { getForcedDefaultAdLanding } from '../constants';
 
 interface ToastPayload {
   show: boolean;
@@ -17,9 +18,13 @@ interface CreativeBulkEditPanelProps {
   onClose: () => void;
   onToast: (toast: ToastPayload) => void;
   initialSelectedCreativeIds?: string[];
+  // Sites applied in the Creatives filter bar: landing edits default to these Sites only.
+  initialSiteIds?: string[];
 }
 
-const CreativeBulkEditPanel: React.FC<CreativeBulkEditPanelProps> = ({ onClose, onToast, initialSelectedCreativeIds }) => {
+type LandingRow = { enabled: boolean; mode: 'list' | 'manual'; landingPageId: string; url: string };
+
+const CreativeBulkEditPanel: React.FC<CreativeBulkEditPanelProps> = ({ onClose, onToast, initialSelectedCreativeIds, initialSiteIds }) => {
   const {
     selectedAdvertiser,
     campaigns, fetchCampaigns,
@@ -53,9 +58,8 @@ const CreativeBulkEditPanel: React.FC<CreativeBulkEditPanelProps> = ({ onClose, 
   const [endEnabled, setEndEnabled] = useState(false);
   const [endDateValue, setEndDateValue] = useState('');
   const [landingEnabled, setLandingEnabled] = useState(false);
-  const [landingMode, setLandingMode] = useState<'list' | 'manual'>('list');
-  const [landingPageId, setLandingPageId] = useState('');
-  const [landingUrl, setLandingUrl] = useState('');
+  const [landingRows, setLandingRows] = useState<Record<string, LandingRow>>({});
+  const [bulkLanding, setBulkLanding] = useState<LandingRow>({ enabled: true, mode: 'list', landingPageId: '', url: '' });
 
   const [isPublishing, setIsPublishing] = useState(false);
 
@@ -187,6 +191,73 @@ const CreativeBulkEditPanel: React.FC<CreativeBulkEditPanelProps> = ({ onClose, 
     [creatives, selectedRowIds]
   );
 
+  // Sites where each selected creative is used, derived from loaded Ads -> placements.
+  const siteIdsByCreative = useMemo(() => {
+    const placementSite = new Map(placements.map((p) => [String(p.id), String(p.siteId)]));
+    const map: Record<string, Set<string>> = {};
+    ads.forEach((ad) => {
+      const adSiteIds = ad.placementIds.map((pid) => placementSite.get(String(pid))).filter(Boolean) as string[];
+      ad.creativeIds.forEach((cid) => {
+        if (!selectedRowIds.has(String(cid))) return;
+        if (!map[cid]) map[cid] = new Set();
+        adSiteIds.forEach((siteId) => map[cid].add(siteId));
+      });
+    });
+    return map;
+  }, [ads, placements, selectedRowIds]);
+
+  const landingSites = useMemo(() => {
+    const ids = new Set<string>();
+    (Object.values(siteIdsByCreative) as Set<string>[]).forEach((set) => set.forEach((id) => ids.add(id)));
+    return Array.from(ids)
+      .map((id) => ({ id, name: sites.find((s) => String(s.id) === id)?.name || `Site ${id}` }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [siteIdsByCreative, sites]);
+
+  const landingSitesKey = landingSites.map((s) => s.id).join(',');
+  useEffect(() => {
+    setLandingRows((prev) => {
+      const next: Record<string, LandingRow> = {};
+      landingSites.forEach((site) => {
+        next[site.id] = prev[site.id] || {
+          enabled: initialSiteIds && initialSiteIds.length > 0 ? initialSiteIds.includes(site.id) : true,
+          mode: 'list',
+          landingPageId: '',
+          url: '',
+        };
+      });
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [landingSitesKey]);
+
+  const forcedDefaultLanding = getForcedDefaultAdLanding(selectedAdvertiser?.name);
+
+  const rowToLanding = (row: LandingRow): { landingPageId?: string; url?: string } | null => {
+    if (row.mode === 'list') {
+      if (!row.landingPageId) return null;
+      return { landingPageId: row.landingPageId, url: landingPages.find((l) => l.id === row.landingPageId)?.url };
+    }
+    const url = row.url.trim();
+    return url ? { url } : null;
+  };
+
+  const updateLandingRow = (siteId: string, changes: Partial<LandingRow>) => {
+    setLandingRows((prev) => ({ ...prev, [siteId]: { ...prev[siteId], ...changes } }));
+  };
+
+  const copyBulkLandingToEnabledSites = () => {
+    setLandingRows((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((siteId) => {
+        if (next[siteId].enabled) next[siteId] = { ...next[siteId], mode: bulkLanding.mode, landingPageId: bulkLanding.landingPageId, url: bulkLanding.url };
+      });
+      return next;
+    });
+  };
+
+  const enabledLandingCount = (Object.values(landingRows) as LandingRow[]).filter((row) => row.enabled && rowToLanding(row)).length;
+
   const namePreview = useMemo(() => {
     if (!nameEnabled) return [];
     return selectedCreativesList.slice(0, 8).map((c) => ({
@@ -220,14 +291,14 @@ const CreativeBulkEditPanel: React.FC<CreativeBulkEditPanelProps> = ({ onClose, 
       }
 
       if (landingEnabled) {
-        if (landingMode === 'list' && landingPageId) {
-          const lp = landingPages.find((l) => l.id === landingPageId);
-          changes.landingPageId = landingPageId;
-          changes.landingPageUrl = lp?.url;
-        } else if (landingMode === 'manual' && landingUrl) {
-          changes.landingPageUrl = landingUrl;
-          changes.landingPageId = undefined;
-        }
+        // Only the Sites where this creative is used and that are ticked with a landing.
+        const landingBySite: Record<string, { landingPageId?: string; url?: string }> = {};
+        (siteIdsByCreative[creative.id] || new Set<string>()).forEach((siteId) => {
+          const row = landingRows[siteId];
+          const landing = row?.enabled ? rowToLanding(row) : null;
+          if (landing) landingBySite[siteId] = landing;
+        });
+        if (Object.keys(landingBySite).length > 0) changes.landingBySite = landingBySite;
       }
 
       if (Object.keys(changes).length > 0) {
@@ -568,39 +639,101 @@ const CreativeBulkEditPanel: React.FC<CreativeBulkEditPanelProps> = ({ onClose, 
                 </label>
                 {landingEnabled && (
                   <div className="pl-7 space-y-3">
-                    <div className="flex p-1 bg-slate-900 rounded-xl border border-slate-800 w-fit">
-                      <button
-                        onClick={() => setLandingMode('list')}
-                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${landingMode === 'list' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
-                      >
-                        From list
-                      </button>
-                      <button
-                        onClick={() => setLandingMode('manual')}
-                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${landingMode === 'manual' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
-                      >
-                        Manual URL
-                      </button>
-                    </div>
-                    {landingMode === 'list' ? (
-                      <select
-                        value={landingPageId}
-                        onChange={(e) => setLandingPageId(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-                      >
-                        <option value="">Select landing page...</option>
-                        {landingPages.map((lp) => (
-                          <option key={lp.id} value={lp.id}>{lp.url || lp.name}</option>
-                        ))}
-                      </select>
+                    <p className="text-[10px] text-slate-500">
+                      La landing se aplica por Site: solo cambian las asignaciones de la creatividad en Ads de los Sites marcados.
+                      Los demás Sites conservan su landing actual.
+                    </p>
+                    {forcedDefaultLanding && (
+                      <p className="text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2">
+                        Los Default Ads de este anunciante mantienen siempre {forcedDefaultLanding}.
+                      </p>
+                    )}
+                    {landingSites.length === 0 ? (
+                      <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                        No se han encontrado Sites para estas creatividades. Carga su campaña con el filtro de Creatives (Campaign → Cargar) para ver en qué Sites se usan.
+                      </p>
                     ) : (
-                      <input
-                        type="text"
-                        value={landingUrl}
-                        onChange={(e) => setLandingUrl(e.target.value)}
-                        placeholder="https://..."
-                        className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-                      />
+                      <>
+                        <div className="flex flex-wrap items-center gap-2 p-2 bg-slate-900 border border-slate-800 rounded-lg">
+                          <span className="text-[10px] uppercase font-bold text-slate-500">Misma landing para los marcados:</span>
+                          <select
+                            value={bulkLanding.mode}
+                            onChange={(e) => setBulkLanding((b) => ({ ...b, mode: e.target.value as 'list' | 'manual' }))}
+                            className="bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[11px] text-slate-200"
+                          >
+                            <option value="list">De la lista</option>
+                            <option value="manual">URL manual</option>
+                          </select>
+                          {bulkLanding.mode === 'list' ? (
+                            <select
+                              value={bulkLanding.landingPageId}
+                              onChange={(e) => setBulkLanding((b) => ({ ...b, landingPageId: e.target.value }))}
+                              className="flex-1 min-w-[180px] bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[11px] text-slate-200"
+                            >
+                              <option value="">Select landing page...</option>
+                              {landingPages.map((lp) => <option key={lp.id} value={lp.id}>{lp.url || lp.name}</option>)}
+                            </select>
+                          ) : (
+                            <input
+                              value={bulkLanding.url}
+                              onChange={(e) => setBulkLanding((b) => ({ ...b, url: e.target.value }))}
+                              placeholder="https://..."
+                              className="flex-1 min-w-[180px] bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[11px] text-slate-200"
+                            />
+                          )}
+                          <button onClick={copyBulkLandingToEnabledSites} className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-200">
+                            Copiar
+                          </button>
+                        </div>
+
+                        <div className="border border-slate-800 rounded-lg divide-y divide-slate-800">
+                          {landingSites.map((site) => {
+                            const row = landingRows[site.id];
+                            if (!row) return null;
+                            const creativesInSite = (Object.values(siteIdsByCreative) as Set<string>[]).filter((set) => set.has(site.id)).length;
+                            return (
+                              <div key={site.id} className={`flex flex-wrap items-center gap-2 px-3 py-2 ${row.enabled ? '' : 'opacity-50'}`}>
+                                <label className="flex items-center gap-2 w-56 min-w-0 cursor-pointer">
+                                  <input type="checkbox" className="accent-blue-500" checked={row.enabled} onChange={(e) => updateLandingRow(site.id, { enabled: e.target.checked })} />
+                                  <span className="min-w-0">
+                                    <span className="block text-xs text-slate-200 truncate" title={site.name}>{site.name}</span>
+                                    <span className="block text-[10px] text-slate-500">{creativesInSite} creatividad(es)</span>
+                                  </span>
+                                </label>
+                                <select
+                                  value={row.mode}
+                                  disabled={!row.enabled}
+                                  onChange={(e) => updateLandingRow(site.id, { mode: e.target.value as 'list' | 'manual' })}
+                                  className="bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[11px] text-slate-200"
+                                >
+                                  <option value="list">De la lista</option>
+                                  <option value="manual">URL manual</option>
+                                </select>
+                                {row.mode === 'list' ? (
+                                  <select
+                                    value={row.landingPageId}
+                                    disabled={!row.enabled}
+                                    onChange={(e) => updateLandingRow(site.id, { landingPageId: e.target.value })}
+                                    className="flex-1 min-w-[200px] bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[11px] text-slate-200"
+                                  >
+                                    <option value="">Sin cambios</option>
+                                    {landingPages.map((lp) => <option key={lp.id} value={lp.id}>{lp.url || lp.name}</option>)}
+                                  </select>
+                                ) : (
+                                  <input
+                                    value={row.url}
+                                    disabled={!row.enabled}
+                                    onChange={(e) => updateLandingRow(site.id, { url: e.target.value })}
+                                    placeholder="https://... (vacío = sin cambios)"
+                                    className="flex-1 min-w-[200px] bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[11px] text-slate-200"
+                                  />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[10px] text-slate-500">{enabledLandingCount} Site(s) con landing asignada.</p>
+                      </>
                     )}
                   </div>
                 )}
