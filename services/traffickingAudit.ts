@@ -7,6 +7,9 @@ export interface CmPlacementLite {
   campaignId: string;
   campaignName?: string;
   archived: boolean;
+  inactive: boolean;
+  /** Permanently archived placements can't be restored or checked: the audit ignores them entirely. */
+  permanentlyArchived: boolean;
 }
 
 export interface DvInsertionOrder {
@@ -140,7 +143,7 @@ const deviceOf = (campaignName: string, name: string): string | undefined =>
   tokensAfterCampaign(campaignName, name).find((t) => DEVICE_TOKENS.includes(t));
 
 export const isExpectedInDv360 = (placement: CmPlacementLite) =>
-  !placement.archived && nameTokens(placement.name).includes(DV360_TOKEN);
+  !placement.archived && !placement.inactive && nameTokens(placement.name).includes(DV360_TOKEN);
 
 const creativePlacementId = (creative: DvCreative) =>
   creative.cmPlacementId || creative.cmTrackingAd?.cmPlacementId || undefined;
@@ -269,6 +272,7 @@ export const auditCampaign = (input: AuditInput): AuditResult => {
         }, li.lineItemId);
         return;
       }
+      if (placement.permanentlyArchived) return;
 
       if (own) {
         const entry = assignments.get(placementId) || { lineItemIds: new Set<string>(), ioIds: new Set<string>() };
@@ -327,7 +331,7 @@ export const auditCampaign = (input: AuditInput): AuditResult => {
   });
 
   // 3. Expected placements missing in DV360
-  const coverage: PlacementCoverageRow[] = input.campaignPlacements.map((placement) => {
+  const coverage: PlacementCoverageRow[] = input.campaignPlacements.filter((p) => !p.permanentlyArchived).map((placement) => {
     const entry = assignments.get(placement.id);
     return {
       placement,

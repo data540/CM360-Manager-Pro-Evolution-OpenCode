@@ -34,7 +34,10 @@ const toLite = (p: any, campaignNames: Record<string, string> = {}): CmPlacement
   name: p.name,
   campaignId: String(p.campaignId),
   campaignName: campaignNames[p.campaignId],
-  archived: !!p.archived,
+  // CM360 v5 placements report status in `activeStatus`; there is no `archived` flag any more.
+  archived: p.activeStatus === 'PLACEMENT_STATUS_ARCHIVED' || p.activeStatus === 'PLACEMENT_STATUS_PERMANENTLY_ARCHIVED',
+  inactive: p.activeStatus === 'PLACEMENT_STATUS_INACTIVE',
+  permanentlyArchived: p.activeStatus === 'PLACEMENT_STATUS_PERMANENTLY_ARCHIVED',
 });
 
 const chunk = <T,>(items: T[], size: number): T[][] =>

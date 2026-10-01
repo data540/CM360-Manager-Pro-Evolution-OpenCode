@@ -16,7 +16,7 @@ const PRS_DESKTOP_IO = { insertionOrderId: '1026288086', displayName: 'ae-ch_kpi
 const RTG_DESKTOP_IO = { insertionOrderId: '1026287810', displayName: 'ae-ch_kpi360_ao_dis_rtg_dv360_desktop', entityStatus: 'ENTITY_STATUS_ACTIVE' };
 
 const placement = (id: string, name: string, extra: Partial<CmPlacementLite> = {}): CmPlacementLite => ({
-  id, name: `${name}_${id}`, campaignId: CAMPAIGN.id, archived: false, ...extra,
+  id, name: `${name}_${id}`, campaignId: CAMPAIGN.id, archived: false, inactive: false, permanentlyArchived: false, ...extra,
 });
 const creativeFor = (p: CmPlacementLite, creativeId: string, extra: Partial<DvCreative> = {}): DvCreative => ({
   creativeId, displayName: p.name, cmPlacementId: p.id,
@@ -137,11 +137,26 @@ test('mobile placement in a desktop line item is a device mismatch', () => {
   })), ['device_mismatch']);
 });
 
-test('dv360 placement not assigned anywhere is missing; non-dv360 and archived ones are ignored', () => {
+test('dv360 placement not assigned anywhere is missing; non-dv360, archived and inactive ones are ignored', () => {
   const quantcast = placement('500', 'ae-ch_kpi360_ao_2025_dis_prs_quantcast_desktop_gen_300x250');
   const archived = placement('501', 'ae-ch_kpi360_ao_2025_dis_prs_dv360_desktop_gen_300x250', { archived: true });
-  const result = auditCampaign(baseInput({ campaignPlacements: [GEN_DESKTOP, GEN_MOBILE, quantcast, archived] }));
+  const inactive = placement('502', 'ae-ch_kpi360_ao_dis_prs_dv360_mobile_audience-extension_320x100', { inactive: true });
+  const result = auditCampaign(baseInput({ campaignPlacements: [GEN_DESKTOP, GEN_MOBILE, quantcast, archived, inactive] }));
   assert.deepEqual(result.issues.map((i) => [i.code, i.placementId]), [['missing_in_dv360', GEN_MOBILE.id]]);
+});
+
+test('permanently archived placements are ignored entirely; archived ones still warn when assigned', () => {
+  const gone = placement('441002464', 'ae-ch_kpi360_ao_dis_prs_dv360_desktop_audience-extension_320x100', { archived: true, permanentlyArchived: true });
+  const ignored = auditCampaign(baseInput({
+    campaignPlacements: [GEN_DESKTOP, gone],
+    lineItems: [lineItem('1', PRS_DESKTOP_IO, 'affinity', ['c1', 'c8'])],
+    creatives: [creativeFor(GEN_DESKTOP, 'c1'), creativeFor(gone, 'c8')],
+  }));
+  assert.deepEqual(ignored.issues, []);
+  assert.deepEqual(ignored.coverage.map((r) => r.placement.id), [GEN_DESKTOP.id]);
+
+  const archived = { ...GEN_DESKTOP, archived: true };
+  assert.deepEqual(codes(baseInput({ campaignPlacements: [archived] })), ['placement_archived']);
 });
 
 test('renamed placement in CM360 is a name mismatch', () => {
