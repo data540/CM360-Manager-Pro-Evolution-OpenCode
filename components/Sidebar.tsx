@@ -7,13 +7,16 @@ import {
   Layers, 
   Image as ImageIcon, 
   Megaphone,
+  FileSpreadsheet,
+  FolderInput,
   Settings as SettingsIcon,
   ChevronDown,
   Circle,
   Database,
   RefreshCw,
   Plus,
-  ShieldCheck
+  ShieldCheck,
+  Radar
 } from 'lucide-react';
 import Toast from './Toast';
 
@@ -124,6 +127,9 @@ const Sidebar: React.FC = () => {
     { type: 'Ads', icon: Megaphone, label: 'Ads' },
     { type: 'Creatives', icon: ImageIcon, label: 'Creatives' },
     { type: 'Audit', icon: ShieldCheck, label: 'Audit DV360' },
+    { type: 'AuditQuantcast', icon: Radar, label: 'Audit Quantcast' },
+    { type: 'FormatReport', icon: FileSpreadsheet, label: 'Formatos pendientes' },
+    { type: 'TrafficFolder', icon: FolderInput, label: 'Traficar desde carpeta' },
     { type: 'Settings', icon: SettingsIcon, label: 'Settings' },
   ];
 

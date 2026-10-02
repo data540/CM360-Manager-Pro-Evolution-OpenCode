@@ -7,6 +7,9 @@ import CreativeGrid from './components/CreativeGrid';
 import CampaignGrid from './components/CampaignGrid';
 import AdGrid from './components/AdGrid';
 import TraffickingAudit from './components/TraffickingAudit';
+import QuantcastAudit from './components/QuantcastAudit';
+import FormatReportView from './components/FormatReportView';
+import TrafficFromFolder from './components/TrafficFromFolder';
 import Login from './components/Login';
 import SettingsPanel from './components/SettingsPanel';
 import { ChevronRight, LogOut } from 'lucide-react';
@@ -113,6 +116,12 @@ const MainContent: React.FC<{ theme: 'dark' | 'light'; onThemeChange: (theme: 'd
         return <AdGrid />;
       case 'Audit':
         return <TraffickingAudit />;
+      case 'AuditQuantcast':
+        return <QuantcastAudit />;
+      case 'FormatReport':
+        return <FormatReportView />;
+      case 'TrafficFolder':
+        return <TrafficFromFolder />;
       case 'Settings':
         return <SettingsPanel theme={theme} onThemeChange={onThemeChange} />;
       default:

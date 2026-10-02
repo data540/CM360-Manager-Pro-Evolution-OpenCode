@@ -1,7 +1,27 @@
 
+import fs from "node:fs";
+import path from "node:path";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import cors from "cors";
+import { handleQuantcastGraphql } from "./api/_quantcast";
+
+// `tsx` runs this file directly, without Vite's own .env loading, so local secrets
+// (QUANTCAST_API_KEY, etc.) from .env.local would otherwise never reach process.env.
+// Vercel sets its own env vars directly, and .env.local is git-ignored and absent there,
+// so this is a no-op in production.
+const loadEnvLocal = () => {
+  try {
+    const content = fs.readFileSync(path.resolve(".env.local"), "utf8");
+    for (const line of content.split(/\r?\n/)) {
+      const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
+      if (match && !(match[1] in process.env)) process.env[match[1]] = match[2].trim();
+    }
+  } catch {
+    // .env.local is optional.
+  }
+};
+if (process.env.NODE_ENV !== "production") loadEnvLocal();
 
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -91,6 +111,9 @@ async function startServer() {
   app.use("/api/dv360", (req, res) =>
     proxyRequest(req, res, "https://displayvideo.googleapis.com/v4", "/api/dv360"),
   );
+
+  // Quantcast is NOT a dumb proxy: it holds its own secret and checks the caller first (see api/_quantcast.ts).
+  app.use("/api/quantcast/graphql", (req, res) => handleQuantcastGraphql(req, res));
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

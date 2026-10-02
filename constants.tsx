@@ -3,6 +3,9 @@ import { Advertiser, Campaign, Site, Placement, Creative } from './types';
 
 export const DEFAULT_CLIENT_ID = "547547481261-0o6coge0fufp839q33ekv7hk1930m7o1.apps.googleusercontent.com";
 
+/** Quantcast account ID used by default in the Audit Quantcast view (Air Europa's main account). */
+export const DEFAULT_QUANTCAST_ACCOUNT_ID = "9964009";
+
 /** OAuth client used for Google sign-in: a custom one saved in Settings, or the default. */
 export const getGoogleClientId = (): string => {
   try {
