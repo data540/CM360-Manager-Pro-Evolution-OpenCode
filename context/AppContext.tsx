@@ -218,7 +218,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const client = (window as any).google.accounts.oauth2.initTokenClient({
           client_id: clientId || DEFAULT_CLIENT_ID,
           scope: CM360_SCOPES,
-          prompt: 'consent',
           callback: async (response: any) => {
             if (response.error) {
               console.error("GSI Error Callback:", response);
@@ -2068,7 +2067,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const login = (customClientId?: string) => {
     const client = customClientId ? initGsi(customClientId) : tokenClient;
     if (client) {
-      client.requestAccessToken({ prompt: 'consent' });
+      try {
+        const storedUser = localStorage.getItem('cm360_user');
+        const email = storedUser ? JSON.parse(storedUser).email : '';
+        client.requestAccessToken(email ? { prompt: '', login_hint: email } : { prompt: 'select_account' });
+      } catch {
+        client.requestAccessToken({ prompt: 'select_account' });
+      }
     } else {
       const errorMsg = "Google Identity Services no se ha cargado correctamente. Recarga la página.";
       window.dispatchEvent(new CustomEvent('cm360_auth_error', { detail: errorMsg }));

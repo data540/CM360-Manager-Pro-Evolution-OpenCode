@@ -14,7 +14,7 @@ const MAX_DEPTH = 4;
 
 const readStoredToken = (): string | null => {
   try {
-    const raw = sessionStorage.getItem(TOKEN_STORAGE_KEY);
+    const raw = localStorage.getItem(TOKEN_STORAGE_KEY);
     if (!raw) return null;
     const { token, expiresAt } = JSON.parse(raw);
     return Date.now() < expiresAt ? token : null;
@@ -25,7 +25,7 @@ const readStoredToken = (): string | null => {
 
 export const clearDriveToken = () => {
   try {
-    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
   } catch {
     // ignore storage errors
   }
@@ -52,7 +52,7 @@ export const getDriveToken = (clientId: string): Promise<string> => {
         }
         const expiresAt = Date.now() + (Number(response.expires_in || 3600) - 60) * 1000;
         try {
-          sessionStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify({ token: response.access_token, expiresAt }));
+          localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify({ token: response.access_token, expiresAt }));
         } catch {
           // ignore storage errors
         }
