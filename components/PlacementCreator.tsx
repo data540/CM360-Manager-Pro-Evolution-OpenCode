@@ -118,8 +118,8 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
   };
 
   const extractTechToken = (fullName: string) => {
-    // Exclusion: Ignore 'kpi360'
-    const parts = fullName.split('_').filter(p => p.toLowerCase() !== 'kpi360' && p.trim() !== '');
+    // Exclusion: Ignore any kpiNNN token (kpi360, kpi361, …)
+    const parts = fullName.split('_').filter(p => !/^kpi\d+$/i.test(p) && p.trim() !== '');
     const normalizedTechOptions = new Set(NAMING_TAXONOMY.Tech.map((value) => normalizeToken(value)));
     
     // Check if any part matches the tech catalog
@@ -132,8 +132,8 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
   };
 
   const extractSiteToken = (fullName: string) => {
-    // Exclusion: Ignore 'kpi360'
-    const parts = fullName.split('_').filter(p => p.toLowerCase() !== 'kpi360' && p.trim() !== '');
+    // Exclusion: Ignore any kpiNNN token (kpi360, kpi361, …)
+    const parts = fullName.split('_').filter(p => !/^kpi\d+$/i.test(p) && p.trim() !== '');
     const normalizedSiteOptions = new Set(NAMING_TAXONOMY.Sites.map((value) => normalizeToken(value)));
     
     // 1. Try standard position (index 1)
@@ -183,6 +183,7 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
     ]);
     const relevantTokens = allTokens.filter((token) => {
       if (genericTokens.has(token)) return false;
+      if (/^kpi\d+$/.test(token)) return false;
       if (/^\d{4}$/.test(token)) return false;
       if (/^\d+x\d+$/.test(token)) return false;
       return true;
@@ -214,7 +215,7 @@ const PlacementCreator: React.FC<PlacementCreatorProps> = ({ onClose }) => {
 
     const tryMatch = (token: string) => {
       const normalized = normalizeToken(token);
-      if (!normalized || normalized === 'kpi360') return null;
+      if (!normalized || /^kpi\d+$/.test(normalized)) return null;
 
       const scored = sites
         .map((site) => {

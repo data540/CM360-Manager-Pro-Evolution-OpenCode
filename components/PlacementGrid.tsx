@@ -60,6 +60,7 @@ const PlacementGrid: React.FC = () => {
   const [editEndDate, setEditEndDate] = useState('');
   const [isBulkNamingOpen, setIsBulkNamingOpen] = useState(false);
   const [isBulkActionsOpen, setIsBulkActionsOpen] = useState(false);
+  const [isFixingNaming, setIsFixingNaming] = useState(false);
   const [isSyncingSites, setIsSyncingSites] = useState(false);
   const [isPackageModalOpen, setIsPackageModalOpen] = useState(false);
   const [placementGroups, setPlacementGroups] = useState<PlacementGroupSummary[]>([]);
@@ -287,6 +288,20 @@ const PlacementGrid: React.FC = () => {
     link.setAttribute("download", `placements_batch_${new Date().getTime()}.csv`);
     document.body.appendChild(link);
     link.click();
+  };
+
+  // Placements whose name has a kpiNNN token other than kpi360 (e.g. kpi361, kpi362…)
+  const wrongKpiPlacements = placements.filter((p) => /_kpi(?!360_)\d+_/i.test(p.name));
+
+  const handleFixKpiNaming = async () => {
+    if (wrongKpiPlacements.length === 0) return;
+    setIsFixingNaming(true);
+    for (const p of wrongKpiPlacements) {
+      const fixed = p.name.replace(/_kpi\d+_/gi, '_kpi360_');
+      updatePlacementName(p.id, fixed);
+    }
+    await publishSelectedDrafts(wrongKpiPlacements.map((p) => p.id));
+    setIsFixingNaming(false);
   };
 
   const handleDuplicateSelected = () => {
@@ -522,6 +537,24 @@ const PlacementGrid: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {wrongKpiPlacements.length > 0 && (
+        <div className="mx-4 mb-0 mt-2 flex items-center gap-3 px-4 py-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>
+            {wrongKpiPlacements.length} placement{wrongKpiPlacements.length > 1 ? 's' : ''} con naming incorrecto
+            ({[...new Set(wrongKpiPlacements.map((p) => (p.name.match(/_kpi(\d+)_/i) || [])[1]).filter(Boolean))].map((n) => `kpi${n}`).join(', ')}).
+            Se reemplazarán por <strong>kpi360</strong>.
+          </span>
+          <button
+            onClick={handleFixKpiNaming}
+            disabled={isFixingNaming}
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-lg font-semibold transition-all disabled:opacity-50"
+          >
+            {isFixingNaming ? <><RefreshCw className="w-3 h-3 animate-spin" /> Corrigiendo…</> : 'Corregir en CM360'}
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto relative z-0 custom-scrollbar">
         <div className="list-surface m-4 rounded-2xl border border-[#2a4163] bg-[#152542] overflow-hidden">
