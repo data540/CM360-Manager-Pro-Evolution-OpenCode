@@ -91,7 +91,7 @@ const proxyRequest = async (
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.CM360_PORT) || 3000;
 
   app.use(cors());
 

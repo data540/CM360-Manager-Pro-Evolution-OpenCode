@@ -84,10 +84,11 @@ interface AppContextType {
   updateCreativeStatus: (creativeIds: string[], active: boolean) => Promise<{success: number, failed: number, error?: string}>;
   copyCreative: (creativeId: string, destinationAdvertiserId: string) => Promise<{success: boolean, id?: string, error?: string}>;
   assignCreativeToPlacement: (creativeId: string, placementId: string, campaignId: string) => Promise<{success: boolean, id?: string, error?: string}>;
-  createAd: (params: { campaignId: string; placementId: string; name: string; creativeId?: string }) => Promise<{success: boolean, id?: string, error?: string}>;
+  createAd: (params: { campaignId: string; placementId: string; name: string; creativeId?: string; creativeIds?: string[] }) => Promise<{success: boolean, id?: string, error?: string}>;
   fetchPlacementGroups: (campaignId: string) => Promise<PlacementGroupSummary[]>;
   createPlacementPackage: (params: CreatePlacementPackageParams) => Promise<CreatePlacementPackageResult>;
   assignCreativeToAd: (creativeId: string, adId: string, campaignId?: string, mode?: 'add' | 'replace') => Promise<{success: boolean, id?: string, error?: string}>;
+  associateCreativeWithCampaign: (creativeId: string, campaignId: string) => Promise<{success: boolean, error?: string}>;
   unassignCreativeFromAd: (creativeId: string, adId: string, campaignId?: string, refreshAds?: boolean) => Promise<{success: boolean, error?: string}>;
   isAdsLoading: boolean;
 }
@@ -1210,18 +1211,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!accessToken || !profileId || !campaignId) return [];
     try {
       setIsAdsLoading(true);
-      const res = await fetch(`/api/cm360/userprofiles/${profileId}/ads?campaignIds=${campaignId}&maxResults=200`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
+      const rawAds: any[] = [];
+      let pageToken = '';
+      do {
+        const params = new URLSearchParams({ campaignIds: campaignId, maxResults: '1000' });
+        if (pageToken) params.set('pageToken', pageToken);
+        const res = await fetch(`/api/cm360/userprofiles/${profileId}/ads?${params}`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error?.message || `Ads fetch failed (${res.status})`);
+        rawAds.push(...(data.ads || []));
+        pageToken = data.nextPageToken || '';
+      } while (pageToken);
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        console.error('Fetch ads error:', data);
-        setAds((prev) => prev.filter((ad) => ad.campaignId !== campaignId));
-        return [];
-      }
-
-      const mappedAds: Ad[] = (data.ads || []).map((ad: any) => {
+      const mappedAds: Ad[] = rawAds.map((ad: any) => {
         const placementIds = (ad.placementAssignments || [])
           .map((pa: any) => pa.placementId)
           .filter(Boolean);
@@ -1539,27 +1543,46 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  const createAd = async (params: { campaignId: string; placementId: string; name: string; creativeId?: string }) => {
-    const { campaignId, placementId, name, creativeId } = params;
+  const createAd = async (params: { campaignId: string; placementId: string; name: string; creativeId?: string; creativeIds?: string[] }) => {
+    const { campaignId, placementId, name, creativeId, creativeIds } = params;
     if (!accessToken || !profileId) return { success: false, error: 'No connection' };
     try {
+      const ids = Array.from(new Set([...(creativeIds || []), ...(creativeId ? [creativeId] : [])]));
+      for (const id of ids) {
+        const association = await associateCreativeWithCampaign(id, campaignId);
+        if (!association.success) return { success: false, error: `Campaign association failed: ${association.error}` };
+      }
+      const startTime = new Date(Date.now() + 60_000);
+      const campaignEnd = campaigns.find((campaign) => campaign.id === campaignId)?.endDate;
+      const proposedEnd = campaignEnd ? new Date(campaignEnd) : null;
+      const endTime = proposedEnd && proposedEnd.getTime() > startTime.getTime()
+        ? proposedEnd
+        : new Date(startTime.getTime() + 30 * 24 * 60 * 60 * 1000);
       const body: any = {
         campaignId,
+        advertiserId: campaigns.find((campaign) => campaign.id === campaignId)?.advertiserId || selectedAdvertiser?.id,
         name,
-        active: true,
+        active: ids.length > 0,
         type: 'AD_SERVING_STANDARD_AD',
+        deliverySchedule: { priority: 'AD_PRIORITY_01', impressionRatio: '1' },
         placementAssignments: [{
           placementId,
           active: true
         }],
-        startTime: new Date().toISOString(),
-        endTime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() // 30 days default
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString()
       };
-      if (creativeId) {
-        body.creativeAssignments = [{
-          creativeId,
-          active: true
-        }];
+      if (ids.length > 0) {
+        body.creativeRotation = {
+          type: 'CREATIVE_ROTATION_TYPE_RANDOM',
+          weightCalculationStrategy: 'WEIGHT_STRATEGY_EQUAL',
+          creativeAssignments: ids.map((id) => ({
+            creativeId: id,
+            active: true,
+            weight: 1,
+            clickThroughUrl: { defaultLandingPage: true }
+          }))
+        };
       }
 
       const adRes = await fetch(`/api/cm360/userprofiles/${profileId}/ads`, {
@@ -1576,7 +1599,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         await fetchAds(campaignId);
         return { success: true, id: adData.id };
       }
-      return { success: false, error: adData.error?.message || 'Ad creation failed' };
+      return { success: false, error: adData.error?.errors?.map((e: any) => e?.message).filter(Boolean).join(' | ') || adData.error?.message || 'Ad creation failed' };
     } catch (e: any) {
       console.error("Create ad error:", e);
       return { success: false, error: e.message || 'Network error' };
@@ -1690,6 +1713,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     } catch (e: any) {
       console.error('Create placement package error:', e);
       return { success: false, error: e.message || 'Network error', ...empty };
+    }
+  };
+
+  const associateCreativeWithCampaign = async (creativeId: string, campaignId: string) => {
+    if (!accessToken || !profileId) return { success: false, error: 'No connection' };
+    try {
+      const res = await fetch(`/api/cm360/userprofiles/${profileId}/campaigns/${campaignId}/campaignCreativeAssociations`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creativeId })
+      });
+      if (res.ok) return { success: true };
+      const data = await res.json().catch(() => ({}));
+      const error = data?.error?.errors?.map((item: any) => item?.message).filter(Boolean).join(' | ')
+        || data?.error?.message || `HTTP ${res.status}`;
+      // A repeated association is safe; the caller still checks the actual Default Ads.
+      return /already|exists|duplicate/i.test(error)
+        ? { success: true }
+        : { success: false, error };
+    } catch (e: any) {
+      return { success: false, error: e.message || 'Network error' };
     }
   };
 
@@ -2646,7 +2690,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setSelectedAdvertiser, setSelectedCampaign, setSelectedAd, setCurrentView, setIsGlobalSearchActive,
       addPlacements, updateCampaignDraft, updatePlacement, updatePlacementDraft, updatePlacementName, updateAdDraft, updateCreativeDraft, updateAdName, updateCreativeName, deletePlacement, publishSelectedDrafts, publishSelectedAdDrafts, publishSelectedCreativeDrafts,
       connectionStatus, isAuthenticated, accessToken, profileId, accountId, accounts, switchAccount, user, login, loginWithToken, enterDemoMode, logout,
-      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchAds, fetchCreatives, fetchAllCreatives, fetchCreativesByIds, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, pushCampaigns, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement, createAd, fetchPlacementGroups, createPlacementPackage, assignCreativeToAd, unassignCreativeFromAd, isAdsLoading
+      fetchAdvertisers, fetchCampaigns, fetchPlacements, fetchAds, fetchCreatives, fetchAllCreatives, fetchCreativesByIds, fetchSites, fetchLandingPages, createCampaign, updateCampaignStatus, pushCampaigns, isCampaignsLoading, pushPlacements, uploadCreative, updateCreativeStatus, copyCreative, assignCreativeToPlacement, createAd, fetchPlacementGroups, createPlacementPackage, assignCreativeToAd, associateCreativeWithCampaign, unassignCreativeFromAd, isAdsLoading
     }}>
       {children}
     </AppContext.Provider>

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { Ad, Creative, Site } from '../types';
+import { Ad, Creative, Placement, Site } from '../types';
 import { CM360_ERROR_MAPPING, NAMING_TAXONOMY } from '../constants';
 import { 
   Search, 
@@ -58,6 +58,8 @@ const CreativeGrid: React.FC = () => {
     fetchCreativesByIds,
     assignCreativeToPlacement,
     assignCreativeToAd,
+    associateCreativeWithCampaign,
+    createAd,
     unassignCreativeFromAd,
     creativesDrafts,
     fetchLandingPages
@@ -166,7 +168,8 @@ const CreativeGrid: React.FC = () => {
     try { return localStorage.getItem('cm360_batch_default_ads') !== 'false'; } catch { return true; }
   });
   const [defaultAssignMode, setDefaultAssignMode] = useState<'replace' | 'add'>('replace');
-  type DefaultPlanEntry = { size: string; files: Array<{ fileId: string; name: string; setKey: string }>; defaultAds: Ad[] };
+  const [createMissingDefaultAds, setCreateMissingDefaultAds] = useState(true);
+  type DefaultPlanEntry = { size: string; files: Array<{ fileId: string; name: string; setKey: string }>; defaultAds: Ad[]; missingPlacements: Placement[] };
   const [defaultChoice, setDefaultChoice] = useState<{
     entries: DefaultPlanEntry[];
     sets: Array<{ key: string; sizes: string[] }>;
@@ -188,7 +191,7 @@ const CreativeGrid: React.FC = () => {
     assignment: 170,
   });
 
-  const isDefaultAd = (ad: Ad) => ad.type === 'AD_SERVING_DEFAULT_AD' || /default/i.test(ad.name || '');
+  const isDefaultAd = (ad: Ad) => ad.type === 'AD_SERVING_DEFAULT_AD' || (!ad.type && /default/i.test(ad.name || ''));
 
   const campaignAds = selectedCampaign
     ? ads.filter((ad) => ad.campaignId === selectedCampaign.id)
@@ -349,14 +352,14 @@ const CreativeGrid: React.FC = () => {
     });
   };
 
-  const getAdsBySize = (): Map<string, Ad[]> => {
+  const getAdsBySize = (sourceAds: Ad[] = campaignAds): Map<string, Ad[]> => {
     const map = new Map<string, Ad[]>();
-    campaignAds.forEach((ad) => {
+    sourceAds.forEach((ad) => {
       const uniqueSizes = new Set<string>();
       ad.placementIds.forEach((placementId) => {
         const placement = placements.find((p) => p.id === placementId);
         if (!placement) return;
-        if (effectiveSelectedSiteIds.size > 0 && !effectiveSelectedSiteIds.has(placement.siteId)) return;
+        if (!effectiveSelectedSiteIds.has(placement.siteId)) return;
         const size = normalizeSize(placement.size || null);
         if (size) uniqueSizes.add(size);
       });
@@ -369,13 +372,30 @@ const CreativeGrid: React.FC = () => {
     return map;
   };
 
-  const getDefaultAdsBySize = (): Map<string, Ad[]> => {
+  const getDefaultAdsBySize = (sourceAds: Ad[] = campaignAds): Map<string, Ad[]> => {
     const map = new Map<string, Ad[]>();
-    getAdsBySize().forEach((adsForSize, size) => {
-      const defaults = adsForSize.filter(isDefaultAd);
-      if (defaults.length > 0) map.set(size, defaults);
+    sourceAds.filter(isDefaultAd).forEach((ad) => {
+      ad.placementIds.forEach((placementId) => {
+        const placement = campaignPlacements.find((p) => p.id === placementId);
+        if (!placement || !effectiveSelectedSiteIds.has(placement.siteId)) return;
+        const size = normalizeSize(placement.size || null);
+        if (!size) return;
+        if (!map.has(size)) map.set(size, []);
+        if (!map.get(size)!.some((item) => item.id === ad.id)) map.get(size)!.push(ad);
+      });
     });
     return map;
+  };
+
+  const getMatchingDefaultPlacements = (size: string) => campaignPlacements.filter((placement) =>
+    effectiveSelectedSiteIds.has(placement.siteId)
+    && normalizeSize(placement.size || null) === size
+    && (selectedFormat === 'Video' ? placement.compatibility === 'IN_STREAM_VIDEO' : placement.compatibility === 'DISPLAY')
+  );
+
+  const getMissingDefaultPlacements = (size: string, sourceAds: Ad[]) => {
+    const covered = new Set(sourceAds.filter(isDefaultAd).flatMap((ad) => ad.placementIds));
+    return getMatchingDefaultPlacements(size).filter((placement) => !covered.has(placement.id));
   };
 
   const getFileId = (file: File) => `${file.name}|${file.size}|${file.lastModified}`;
@@ -393,6 +413,10 @@ const CreativeGrid: React.FC = () => {
   const selectDefaultsForSet = (entries: DefaultPlanEntry[], setKey: string, current: Record<string, string>) => {
     const next: Record<string, string> = { ...current };
     entries.forEach((entry) => {
+      if (getMatchingDefaultPlacements(entry.size).length === 0) {
+        next[entry.size] = '';
+        return;
+      }
       const fromSet = entry.files.find((f) => f.setKey === setKey);
       if (fromSet) next[entry.size] = fromSet.fileId;
       else if (!(entry.size in next)) next[entry.size] = entry.files.length === 1 ? entry.files[0].fileId : '';
@@ -400,13 +424,18 @@ const CreativeGrid: React.FC = () => {
     return next;
   };
 
-  const buildDefaultPlan = async (files: File[]) => {
-    const defaultAdsBySize = getDefaultAdsBySize();
+  const buildDefaultPlan = async (files: File[], sourceAds: Ad[]) => {
+    const defaultAdsBySize = getDefaultAdsBySize(sourceAds);
     const bySize = new Map<string, DefaultPlanEntry>();
     for (const file of files) {
       const { finalSize } = await resolveFileSize(file);
       if (!bySize.has(finalSize)) {
-        bySize.set(finalSize, { size: finalSize, files: [], defaultAds: defaultAdsBySize.get(finalSize) || [] });
+        const matchingIds = new Set(getMatchingDefaultPlacements(finalSize).map((p) => p.id));
+        bySize.set(finalSize, {
+          size: finalSize, files: [],
+          defaultAds: (defaultAdsBySize.get(finalSize) || []).filter((ad) => ad.placementIds.some((id) => matchingIds.has(id))),
+          missingPlacements: getMissingDefaultPlacements(finalSize, sourceAds),
+        });
       }
       bySize.get(finalSize)!.files.push({ fileId: getFileId(file), name: file.name, setKey: getCreativeSetKey(file.name) });
     }
@@ -423,7 +452,10 @@ const CreativeGrid: React.FC = () => {
 
     const selectedSetKey = sets[0]?.key || '';
     const selection = selectDefaultsForSet(entries, selectedSetKey, {});
-    const needsChoice = entries.some((entry) => entry.files.length > 1 && entry.defaultAds.length > 0);
+    const needsChoice = entries.some((entry) =>
+      (entry.files.length > 1 && (entry.defaultAds.length > 0 || (createMissingDefaultAds && entry.missingPlacements.length > 0)))
+      || (createMissingDefaultAds && entry.missingPlacements.length > 0)
+    );
     return { entries, sets, selection, selectedSetKey, needsChoice };
   };
 
@@ -435,8 +467,8 @@ const CreativeGrid: React.FC = () => {
     return { sizeFromName, sizeFromFile, mismatch, finalSize };
   };
 
-  const resolveBatchPlans = async (files: File[]) => {
-    const adsBySize = getAdsBySize();
+  const resolveBatchPlans = async (files: File[], sourceAds: Ad[]) => {
+    const adsBySize = getAdsBySize(sourceAds);
     const plans: Array<{
       file: File;
       finalSize: string;
@@ -618,45 +650,143 @@ const CreativeGrid: React.FC = () => {
     plans.forEach((plan, idx) => { if (reportRows[idx]) reportRowByFileId[getFileId(plan.file)] = reportRows[idx]; });
 
     if (defaultSelection && selectedCampaign) {
-      const defaultAdsBySize = getDefaultAdsBySize();
+      let freshAds = await fetchAds(selectedCampaign.id);
       const sizesToAssign = (Object.entries(defaultSelection) as Array<[string, string]>).filter(([, fileId]) => !!fileId);
-      const totalAssignments = sizesToAssign.reduce((acc, [size]) => acc + (defaultAdsBySize.get(size)?.length || 0), 0);
+      const totalAssignments = sizesToAssign.length;
       let done = 0;
 
       for (const [size, fileId] of sizesToAssign) {
         const row = reportRowByFileId[fileId];
         const creativeId = uploadedIdByFileId[fileId];
-        const defaultAds = defaultAdsBySize.get(size) || [];
         if (!row) continue;
         if (!creativeId) {
           row.defaultInfo = { ok: false, text: 'Default no asignado: la subida falló.' };
           continue;
         }
-        if (defaultAds.length === 0) {
-          row.defaultInfo = { ok: false, text: `No hay Default Ads de ${size} en los Sites seleccionados.` };
+        const matchingPlacements = getMatchingDefaultPlacements(size);
+        if (matchingPlacements.length === 0) {
+          row.defaultInfo = { ok: false, text: `No hay placements compatibles de ${size} en los Sites seleccionados.` };
           continue;
         }
 
+        const missingBefore = getMissingDefaultPlacements(size, freshAds);
         const failed: string[] = [];
+        if (missingBefore.length > 0 && createMissingDefaultAds) {
+          setBatchProgress({ current: done, total: Math.max(totalAssignments, 1), status: `Creando Default ${size}` });
+          const association = await associateCreativeWithCampaign(creativeId, selectedCampaign.id);
+          if (!association.success) failed.push(`Creación: ${association.error || 'error de CM360'}`);
+          freshAds = await fetchAds(selectedCampaign.id);
+          if (association.success) {
+            for (let attempt = 0; attempt < 2 && getMissingDefaultPlacements(size, freshAds).length > 0; attempt++) {
+              await new Promise((resolve) => window.setTimeout(resolve, 750));
+              freshAds = await fetchAds(selectedCampaign.id);
+            }
+          }
+        }
+
+        const defaultAds = getDefaultAdsBySize(freshAds).get(size) || [];
         for (const ad of defaultAds) {
           done++;
           setBatchProgress({ current: done, total: Math.max(totalAssignments, 1), status: `Default ${size}: ${ad.name}` });
+          if (ad.creativeIds.includes(creativeId) &&
+            (defaultAssignMode === 'add' || ad.creativeIds.length === 1)) continue;
           const assignResult = await assignCreativeToAd(creativeId, ad.id, selectedCampaign.id, defaultAssignMode);
           if (!assignResult.success) failed.push(`${ad.name} (${assignResult.error || 'error'})`);
         }
-        const okCount = defaultAds.length - failed.length;
+        freshAds = await fetchAds(selectedCampaign.id);
+        const missingAfter = getMissingDefaultPlacements(size, freshAds);
+        if (missingAfter.length > 0) failed.push(`Sin Default Ad: ${missingAfter.map((p) => p.name).join(', ')}`);
         row.defaultInfo = failed.length === 0
-          ? { ok: true, text: `Default en ${okCount} Default Ad(s) de ${size} (${defaultAssignMode === 'replace' ? 'sustituye la anterior' : 'añadida'}).` }
-          : { ok: false, text: `Default en ${okCount}/${defaultAds.length} Default Ads. Fallos: ${failed.join('; ')}` };
+          ? { ok: true, text: `${missingBefore.length > 0 ? 'Creado y verificado' : 'Actualizado'} en ${matchingPlacements.length} placement(s) de ${size}.` }
+          : { ok: false, text: `Fallos: ${failed.join('; ')}` };
+        if (row.defaultInfo.ok && row.status === 'assign_failed' &&
+          ['no_match', 'default_only_unselectable'].includes(plans.find((plan) => getFileId(plan.file) === fileId)?.assignmentReason || '')) {
+          row.status = 'uploaded_only';
+          row.detail = 'Creatividad subida y puesta como Default. No hay Ad estándar compatible en los Sites seleccionados.';
+        } else if (!row.defaultInfo.ok && (row.status === 'uploaded_only' || row.status === 'assigned')) {
+          row.status = 'assign_failed';
+        }
       }
 
       // Files that competed for a size but were not picked as default.
+      const defaultAdsBySize = getDefaultAdsBySize(freshAds);
       plans.forEach((plan) => {
         const row = reportRowByFileId[getFileId(plan.file)];
         if (row && !row.defaultInfo && defaultSelection[plan.finalSize] !== undefined && (defaultAdsBySize.get(plan.finalSize)?.length || 0) > 0) {
           row.defaultInfo = { ok: true, text: 'No elegida como default para este tamaño.' };
         }
       });
+    }
+
+    if (batchAssignmentMode === 'auto' && selectedCampaign) {
+      let freshAds = await fetchAds(selectedCampaign.id);
+      const placementsToCreate = new Map<string, { placement: Placement; fileIds: Set<string>; creativeIds: Set<string> }>();
+      const failedCreationFiles = new Set<string>();
+      for (const plan of plans) {
+        if (plan.assignmentReason === 'manual_skipped') continue;
+        const fileId = getFileId(plan.file);
+        const creativeId = uploadedIdByFileId[fileId];
+        if (!creativeId) continue;
+        for (const placement of getMatchingDefaultPlacements(plan.finalSize)) {
+          const linked = freshAds.filter((ad) => ad.placementIds.includes(placement.id));
+          if (!linked.some(isDefaultAd) || linked.some((ad) => !isDefaultAd(ad))) continue;
+          if (!placementsToCreate.has(placement.id)) {
+            placementsToCreate.set(placement.id, { placement, fileIds: new Set(), creativeIds: new Set() });
+          }
+          const target = placementsToCreate.get(placement.id)!;
+          target.fileIds.add(fileId);
+          target.creativeIds.add(creativeId);
+        }
+      }
+
+      for (const { placement, fileIds, creativeIds } of placementsToCreate.values()) {
+        // Refresh before insertion in case a different action created the Ad meanwhile.
+        freshAds = await fetchAds(selectedCampaign.id);
+        const existing = freshAds.find((ad) => !isDefaultAd(ad) && ad.placementIds.includes(placement.id));
+        setBatchProgress({ current: 0, total: placementsToCreate.size, status: `Creando Ad: ${placement.name}` });
+        let adId = existing?.id;
+        let creationError = '';
+        if (existing) {
+          for (const creativeId of creativeIds) {
+            if (existing.creativeIds.includes(creativeId)) continue;
+            const assigned = await assignCreativeToAd(creativeId, existing.id, selectedCampaign.id, 'add');
+            if (!assigned.success) creationError = assigned.error || 'No se pudo asignar la creatividad.';
+          }
+        } else {
+          const created = await createAd({
+            campaignId: selectedCampaign.id,
+            placementId: placement.id,
+            name: placement.name,
+            creativeIds: Array.from(creativeIds),
+          });
+          adId = created.id;
+          if (!created.success) creationError = created.error || 'CM360 rechazó la creación del Ad.';
+        }
+        freshAds = await fetchAds(selectedCampaign.id);
+        const verified = adId && freshAds.find((ad) =>
+          ad.id === adId && !isDefaultAd(ad) && ad.placementIds.includes(placement.id)
+          && Array.from(creativeIds).every((id) => ad.creativeIds.includes(id))
+        );
+        for (const fileId of fileIds) {
+          const row = reportRowByFileId[fileId];
+          if (!row) continue;
+          if (!creationError && verified) {
+            row.adName = [row.adName, existing?.name || placement.name].filter(Boolean).join(', ');
+            const hadAssignmentFailure = row.status === 'assign_failed' &&
+              !['no_match', 'default_only_unselectable'].includes(plans.find((plan) => getFileId(plan.file) === fileId)?.assignmentReason || '');
+            if (!hadAssignmentFailure && !failedCreationFiles.has(fileId)) {
+              row.detail = `Ad estándar ${existing ? 'actualizado' : 'creado'} para ${placement.name} y creatividad asignada.`;
+              if (row.defaultInfo?.ok !== false) row.status = 'assigned';
+            } else {
+              row.detail += ` Ad estándar ${existing ? 'actualizado' : 'creado'} para ${placement.name}.`;
+            }
+          } else {
+            failedCreationFiles.add(fileId);
+            row.status = 'assign_failed';
+            row.detail += ` No se pudo completar el Ad de ${placement.name}: ${creationError || 'CM360 no confirmó el Ad y sus creatividades.'}`;
+          }
+        }
+      }
     }
     defaultSelectionRef.current = null;
 
@@ -783,8 +913,9 @@ const CreativeGrid: React.FC = () => {
     }
 
     if (pendingFiles.length > 0) {
+      const latestAds = selectedCampaign ? await fetchAds(selectedCampaign.id) : [];
       if (assignToDefaultAds && selectedCampaign && defaultSelectionRef.current === null) {
-        const plan = await buildDefaultPlan(pendingFiles);
+        const plan = await buildDefaultPlan(pendingFiles, latestAds);
         if (plan.needsChoice) {
           setDefaultChoice({ entries: plan.entries, sets: plan.sets, selection: plan.selection, selectedSetKey: plan.selectedSetKey });
           return;
@@ -793,7 +924,7 @@ const CreativeGrid: React.FC = () => {
       }
 
       if (batchAssignmentMode === 'auto') {
-        const plans = await resolveBatchPlans(pendingFiles);
+        const plans = await resolveBatchPlans(pendingFiles, latestAds);
         setBatchPlans(plans);
         const firstManualIndex = plans.findIndex((plan) => !plan.manualConfirmed);
 
@@ -2473,7 +2604,7 @@ const CreativeGrid: React.FC = () => {
                   <p className="text-[10px] text-slate-500 mt-2">Select a campaign first to load Ads from CM360.</p>
                 )}
                 {pendingFiles.length > 1 && batchAssignmentMode === 'auto' && selectedCampaign && (
-                  <p className="text-[10px] text-blue-400 mt-2">For batch uploads, Ad will be auto-matched by detected size (filename + file dimensions). If multiple Ads share the same size, manual selection is required per file.</p>
+                  <p className="text-[10px] text-blue-400 mt-2">El lote busca Ads por tamaño. Si un placement compatible solo tiene Default Ad, se creará un Ad estándar con el nombre del placement y se le asignarán las creatividades del lote.</p>
                 )}
                 {pendingFiles.length > 1 && batchAssignmentMode === 'single' && (
                   <p className="text-[10px] text-slate-400 mt-2">All creatives in this batch will be assigned to the selected Ad.</p>
@@ -2502,14 +2633,21 @@ const CreativeGrid: React.FC = () => {
                     </span>
                   </label>
                   {assignToDefaultAds && selectedCampaign && (
-                    <select
-                      value={defaultAssignMode}
-                      onChange={(e) => setDefaultAssignMode(e.target.value as 'replace' | 'add')}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
-                    >
-                      <option value="replace">Sustituir la creatividad actual del Default Ad</option>
-                      <option value="add">Añadir junto a las creatividades actuales del Default Ad</option>
-                    </select>
+                    <>
+                      <label className="flex items-start gap-2 text-xs text-slate-300">
+                        <input type="checkbox" className="accent-emerald-500 mt-0.5" checked={createMissingDefaultAds}
+                          onChange={(e) => setCreateMissingDefaultAds(e.target.checked)} />
+                        <span>Crear Default Ads donde falten en placements compatibles. CM360 puede asociarlos también a otros placements compatibles de la campaña.</span>
+                      </label>
+                      <select
+                        value={defaultAssignMode}
+                        onChange={(e) => setDefaultAssignMode(e.target.value as 'replace' | 'add')}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                      >
+                        <option value="replace">Sustituir la creatividad actual del Default Ad</option>
+                        <option value="add">Añadir junto a las creatividades actuales del Default Ad</option>
+                      </select>
+                    </>
                   )}
                 </div>
               )}
@@ -2560,10 +2698,10 @@ const CreativeGrid: React.FC = () => {
       {defaultChoice && (
         <div className="fixed inset-0 z-[120] flex items-start sm:items-center justify-center p-4 overflow-y-auto bg-slate-950/85 backdrop-blur-sm">
           <div className="my-4 bg-slate-900 border border-slate-800 rounded-3xl p-8 w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto custom-scrollbar shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <h3 className="text-xl font-bold text-white mb-2">¿Qué juego pongo como default?</h3>
+            <h3 className="text-xl font-bold text-white mb-2">Creatividad para los Default Ads</h3>
             <p className="text-slate-400 text-sm mb-5">
-              Hay varios juegos de creatividades con el mismo tamaño. Elige el juego que irá a los Default Ads;
-              puedes ajustar tamaño a tamaño más abajo.
+              Elige la creatividad para cada tamaño. Se actualizarán los Default Ads existentes y, si lo has activado,
+              CM360 creará los que falten en los placements compatibles.
             </p>
 
             <div className="space-y-2 mb-6">
@@ -2605,12 +2743,14 @@ const CreativeGrid: React.FC = () => {
               {defaultChoice.entries.map((entry) => (
                 <div key={entry.size} className="grid grid-cols-[90px_110px_1fr] gap-3 px-3 py-2 border-t border-slate-800 items-center">
                   <span className="text-xs font-mono text-slate-200">{entry.size}</span>
-                  <span className={`text-xs ${entry.defaultAds.length > 0 ? 'text-slate-300' : 'text-slate-600'}`}>
-                    {entry.defaultAds.length > 0 ? `${entry.defaultAds.length} Default Ad(s)` : 'Ninguno'}
+                  <span className="text-xs text-slate-300">
+                    {entry.defaultAds.length} existentes
+                    {entry.missingPlacements.length > 0 && createMissingDefaultAds && ` · ${entry.missingPlacements.length} por crear`}
                   </span>
                   <select
                     value={defaultChoice.selection[entry.size] || ''}
-                    disabled={entry.defaultAds.length === 0}
+                    disabled={getMatchingDefaultPlacements(entry.size).length === 0 ||
+                      (entry.defaultAds.length === 0 && (!createMissingDefaultAds || entry.missingPlacements.length === 0))}
                     onChange={(e) => setDefaultChoice((prev) => prev && ({
                       ...prev,
                       selection: { ...prev.selection, [entry.size]: e.target.value },
@@ -2622,6 +2762,9 @@ const CreativeGrid: React.FC = () => {
                       <option key={f.fileId} value={f.fileId}>{f.name}</option>
                     ))}
                   </select>
+                  {entry.missingPlacements.length > 0 && createMissingDefaultAds && (
+                    <p className="col-span-3 text-[10px] text-amber-300">Sin Default: {entry.missingPlacements.map((p) => p.name).join(', ')}</p>
+                  )}
                 </div>
               ))}
             </div>
@@ -2784,7 +2927,7 @@ const CreativeGrid: React.FC = () => {
               {batchReport.map((row, idx) => {
                 const statusStyles: Record<BatchReportRow['status'], { label: string; className: string }> = {
                   assigned: { label: 'Uploaded & Assigned', className: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10' },
-                  uploaded_only: { label: 'Uploaded (no assignment)', className: 'text-blue-400 border-blue-500/40 bg-blue-500/10' },
+                  uploaded_only: { label: row.defaultInfo?.ok ? 'Default listo' : 'Uploaded (no assignment)', className: 'text-blue-400 border-blue-500/40 bg-blue-500/10' },
                   skipped: { label: 'Assignment Skipped', className: 'text-amber-400 border-amber-500/40 bg-amber-500/10' },
                   assign_failed: { label: 'Assignment Failed', className: 'text-rose-400 border-rose-500/40 bg-rose-500/10' },
                   upload_failed: { label: 'Upload Failed', className: 'text-rose-400 border-rose-500/40 bg-rose-500/10' },
