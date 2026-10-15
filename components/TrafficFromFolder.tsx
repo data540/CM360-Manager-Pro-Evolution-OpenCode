@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronDown, FileText, FolderOpen, Loader2, Rocket, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, FileText, FolderOpen, Layers, Loader2, Plus, Rocket, XCircle } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getGoogleClientId } from '../constants';
 import type { DetectedFile } from '../services/creativeDetection';
@@ -801,47 +801,62 @@ const TrafficFromFolder: React.FC = () => {
       </div>
 
       {folder && (
-        <div className="px-4 py-2.5 border-b border-slate-800 bg-slate-900/30 flex flex-wrap items-center gap-5 text-xs text-slate-400">
-          {/* Mode toggle */}
-          <div className="flex items-center gap-3 border-r border-slate-700 pr-5">
-            <span className="text-slate-500 font-bold uppercase tracking-wider text-[10px]">Modo:</span>
-            <label className="flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="radio"
-                checked={trafficMode === 'existing'}
+        <div className="border-b border-slate-800 bg-slate-900/40">
+          {/* ── Mode selector ── */}
+          <div className="px-4 py-3 flex flex-wrap items-center gap-3">
+            <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500 shrink-0 mr-1">Modo de tráfico</span>
+            <div className="flex rounded-xl border border-slate-700 overflow-hidden">
+              <button
+                onClick={() => { setTrafficMode('existing'); setConfirmKey(null); setFullConfirmKey(null); }}
                 disabled={anyRunning}
-                onChange={() => { setTrafficMode('existing'); setConfirmKey(null); setFullConfirmKey(null); }}
-              />
-              Reutilizar placements existentes
-            </label>
-            <label className="flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="radio"
-                checked={trafficMode === 'create'}
+                className={`flex items-center gap-2 px-5 py-2.5 text-sm font-semibold transition-all disabled:opacity-50 ${
+                  trafficMode === 'existing'
+                    ? 'bg-blue-600 text-white shadow-inner'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'
+                }`}
+              >
+                <Layers className="w-4 h-4" />
+                Reutilizar placements existentes
+              </button>
+              <div className="w-px bg-slate-700 shrink-0" />
+              <button
+                onClick={() => { setTrafficMode('create'); setConfirmKey(null); setFullConfirmKey(null); }}
                 disabled={anyRunning}
-                onChange={() => { setTrafficMode('create'); setConfirmKey(null); setFullConfirmKey(null); }}
-              />
-              Crear desde cero
-            </label>
+                className={`flex items-center gap-2 px-5 py-2.5 text-sm font-semibold transition-all disabled:opacity-50 ${
+                  trafficMode === 'create'
+                    ? 'bg-violet-600 text-white shadow-inner'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'
+                }`}
+              >
+                <Plus className="w-4 h-4" />
+                Crear desde cero
+              </button>
+            </div>
+            {trafficMode === 'existing' && (
+              <span className="text-xs text-slate-500 hidden lg:block">Asigna creatividades de Drive a placements y anuncios existentes en la campaña.</span>
+            )}
+            {trafficMode === 'create' && (
+              <span className="text-xs text-slate-500 hidden lg:block">Crea placements nuevos, sube creatividades y genera Default Ads desde cero.</span>
+            )}
           </div>
 
-          {/* Mode A options */}
+          {/* ── Mode A sub-options ── */}
           {trafficMode === 'existing' && (
-            <>
-              <label className="flex items-center gap-1.5">
+            <div className="px-4 pb-3 flex flex-wrap items-center gap-5 text-xs text-slate-400 border-t border-slate-800/60 pt-2.5">
+              <label className="flex items-center gap-1.5 cursor-pointer select-none">
                 <input type="checkbox" checked={includeDefaultAds} onChange={(e) => setIncludeDefaultAds(e.target.checked)} />
                 Incluir Default Ads
               </label>
               <div className="flex items-center gap-3">
-                <span>En los anuncios, las creatividades nuevas:</span>
-                <label className="flex items-center gap-1.5">
+                <span>Creatividades nuevas:</span>
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
                   <input type="radio" checked={mode === 'replace'} onChange={() => setMode('replace')} /> sustituyen a las actuales
                 </label>
-                <label className="flex items-center gap-1.5">
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
                   <input type="radio" checked={mode === 'add'} onChange={() => setMode('add')} /> se añaden en rotación
                 </label>
               </div>
-            </>
+            </div>
           )}
         </div>
       )}
