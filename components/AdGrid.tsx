@@ -29,6 +29,7 @@ const AdGrid: React.FC = () => {
   const [isCreateAdOpen, setIsCreateAdOpen] = useState(false);
   const [unassigningCreativeId, setUnassigningCreativeId] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isFixingAdNaming, setIsFixingAdNaming] = useState(false);
 
   useEffect(() => {
     if (selectedCampaign) {
@@ -64,6 +65,20 @@ const AdGrid: React.FC = () => {
 
   const selectedAdData = selectedAd ? displayAds.find((ad) => ad.id === selectedAd.id) || null : null;
   const selectedDraftCount = Array.from(selectedRows).filter((id) => !!adsDrafts[id]).length;
+
+  // Ads whose name contains a kpiNNN token other than kpi360 (e.g. kpi361, kpi366…)
+  const wrongKpiAds = ads.filter((a) => /_kpi(?!360_)\d+_/i.test(a.name));
+
+  const handleFixAdKpiNaming = async () => {
+    if (wrongKpiAds.length === 0) return;
+    setIsFixingAdNaming(true);
+    wrongKpiAds.forEach((a) => {
+      const fixed = a.name.replace(/_kpi\d+_/gi, '_kpi360_');
+      updateAdName(a.id, fixed);
+    });
+    await publishSelectedAdDrafts(wrongKpiAds.map((a) => a.id));
+    setIsFixingAdNaming(false);
+  };
 
   const handleUnassignCreative = async (creativeId: string) => {
     if (!selectedCampaign || !selectedAdData) return;
@@ -208,6 +223,24 @@ const AdGrid: React.FC = () => {
           Refresh
         </button>
       </div>
+
+      {wrongKpiAds.length > 0 && (
+        <div className="mx-4 mt-3 flex items-center gap-3 px-4 py-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>
+            {wrongKpiAds.length} ad{wrongKpiAds.length > 1 ? 's' : ''} con naming incorrecto
+            ({[...new Set(wrongKpiAds.map((a) => (a.name.match(/_kpi(\d+)_/i) || [])[1]).filter(Boolean))].map((n) => `kpi${n}`).join(', ')}).
+            Se reemplazarán por <strong>kpi360</strong>.
+          </span>
+          <button
+            onClick={handleFixAdKpiNaming}
+            disabled={isFixingAdNaming}
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-lg font-semibold transition-all disabled:opacity-50"
+          >
+            {isFixingAdNaming ? <><RefreshCw className="w-3 h-3 animate-spin" /> Corrigiendo…</> : 'Corregir en CM360'}
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto p-6 custom-scrollbar">
         {actionNotice && (
