@@ -5,6 +5,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import cors from "cors";
 import { handleQuantcastGraphql } from "./api/_quantcast";
+import { handleQcNativeCloud } from "./api/_qcNativeCloud";
 import {
   getRunState,
   hasSession,
@@ -123,6 +124,7 @@ async function startServer() {
 
   // Quantcast is NOT a dumb proxy: it holds its own secret and checks the caller first (see api/_quantcast.ts).
   app.use("/api/quantcast/graphql", (req, res) => handleQuantcastGraphql(req, res));
+  app.use("/api/qc-native-cloud", (req, res) => handleQcNativeCloud(req, res));
 
   // Quantcast native runner: drives a real Chrome with the user's Quantcast session, so it only
   // answers this machine (the server listens on 0.0.0.0) and this app's own origin (cors() above

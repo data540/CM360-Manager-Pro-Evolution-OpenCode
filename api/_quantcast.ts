@@ -14,7 +14,7 @@ const QUANTCAST_GRAPHQL_URL = 'https://developers.quantcast.com/api/v2/graphql';
 // Refresh a bit before the token's real expiry so we never race a 403 mid-request.
 const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
-class HttpError extends Error {
+export class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
   }
@@ -22,7 +22,7 @@ class HttpError extends Error {
 
 let cachedToken: { value: string; expiresAt: number } | null = null;
 
-const readRawBody = async (req: any): Promise<string> => {
+export const readRawBody = async (req: any): Promise<string> => {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -31,7 +31,7 @@ const readRawBody = async (req: any): Promise<string> => {
 };
 
 /** Validates the caller's Google access token (the app's own CM360 login token) and returns their email. */
-const verifyCaller = async (req: any): Promise<string> => {
+export const verifyCaller = async (req: any): Promise<string> => {
   const header = req.headers?.authorization || req.headers?.Authorization;
   const token = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) throw new HttpError(401, 'Falta la cabecera Authorization con el token de Google.');

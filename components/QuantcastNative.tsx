@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FileUp, FolderOpen, Image as ImageIcon, Loader2, LogIn, PencilLine, Play, Search, Square, XCircle } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, FileUp, FolderOpen, Globe, Image as ImageIcon, Loader2, LogIn, PencilLine, Play, Search, Square, XCircle } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getGoogleClientId } from '../constants';
 import { getDriveFolder, getDriveToken, listDriveTree } from '../services/drive';
@@ -32,12 +32,22 @@ import {
   QcLanguage,
   resolveLanguage,
   RunState,
+  RunStep,
   yearMismatch,
 } from '../services/quantcastNative';
 import { parseCsv, parseXlsx } from '../services/trafficSheet';
 
 const ACCOUNT_KEY = 'qc_native_account';
 const DEFAULT_ACCOUNT = '9964009';
+
+interface CloudSession {
+  loggedIn: boolean;
+  /** The short-lived session of the step in progress, if any (free plan: one session per step). */
+  sessionId?: string;
+  liveUrl?: string;
+}
+
+const CONTEXT_KEY = 'qc_native_bb_context';
 
 interface RunnerStatus {
   available: boolean;
@@ -122,6 +132,10 @@ const QuantcastNative: React.FC = () => {
   const [updateSkip, setUpdateSkip] = useState<Set<string>>(new Set());
   const [runner, setRunner] = useState<RunnerStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [cloud, setCloud] = useState<CloudSession | null>(null);
+  const [cloudRun, setCloudRun] = useState<RunState | null>(null);
+  const [shot, setShot] = useState<string | null>(null);
+  const cloudStop = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const refreshStatus = useCallback(async () => {
@@ -134,12 +148,45 @@ const QuantcastNative: React.FC = () => {
 
   useEffect(() => { void refreshStatus(); }, [refreshStatus]);
 
-  const running = runner?.run?.status === 'running';
+  // Local runner (npm run dev with the user's Chrome) when reachable; otherwise the Browserbase cloud browser.
+  // `?cloud=1` forces the cloud browser on localhost, to test what the team sees on Vercel.
+  const forceCloud = useMemo(() => new URLSearchParams(window.location.search).has('cloud'), []);
+  const useLocal = !!runner?.available && !forceCloud;
+  const localRunning = runner?.run?.status === 'running';
+  const running = localRunning || cloudRun?.status === 'running';
+  const activeRun = useLocal ? runner?.run ?? null : cloudRun;
   useEffect(() => {
-    if (!running) return;
+    if (!localRunning) return;
     const timer = window.setInterval(() => void refreshStatus(), 1500);
     return () => window.clearInterval(timer);
-  }, [running, refreshStatus]);
+  }, [localRunning, refreshStatus]);
+
+  const cloudApi = useCallback(async (action: string, payload: Record<string, unknown> = {}) => {
+    if (!accessToken) throw new Error('Inicia sesión en la app con Google para usar el navegador en la nube.');
+    const res = await fetch('/api/qc-native-cloud', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ action, accountId, ...payload }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error?.message || `Error ${res.status}`);
+    return data;
+  }, [accessToken, accountId]);
+
+  // Release the cloud browser (it is billed while open) when the page is closed.
+  useEffect(() => {
+    if (!cloud?.sessionId || !accessToken) return;
+    const release = () => {
+      void fetch('/api/qc-native-cloud', {
+        method: 'POST',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ action: 'end', sessionId: cloud.sessionId }),
+      });
+    };
+    window.addEventListener('pagehide', release);
+    return () => window.removeEventListener('pagehide', release);
+  }, [cloud, accessToken]);
 
   const withBusy = async (label: string, fn: () => Promise<void>) => {
     setBusy(label);
@@ -308,9 +355,7 @@ const QuantcastNative: React.FC = () => {
       if (!ok) return;
     }
     const driveToken = await getDriveToken(getGoogleClientId());
-    const request: NativeRunRequest = { accountId, driveToken, dryRun, creatives, assignments };
-    await api('run', request);
-    await refreshStatus();
+    await launch({ accountId, driveToken, dryRun, creatives, assignments });
   });
 
   const runUpdates = (dryRun: boolean) => withBusy(dryRun ? 'Lanzando la prueba…' : 'Lanzando la actualización…', async () => {
@@ -319,19 +364,133 @@ const QuantcastNative: React.FC = () => {
       const fields = selectedUpdates.reduce((n, u) => n + Object.keys(u.changes).length, 0);
       if (!window.confirm(`Se van a editar ${selectedUpdates.length} creatividad(es) en Quantcast (${fields} campo(s) en total). ¿Continuar?`)) return;
     }
-    const request: NativeRunRequest = { accountId, driveToken: '', dryRun, creatives: [], assignments: [], updates: selectedUpdates };
-    await api('run', request);
-    await refreshStatus();
+    await launch({ accountId, driveToken: '', dryRun, creatives: [], assignments: [], updates: selectedUpdates });
   });
 
+  // --- Cloud browser (Browserbase) ---------------------------------------------------------
+
+  /** A fresh cloud session with the user's saved Context; its live view is shown while it works. */
+  const openCloudSession = async () => {
+    let contextId: string | undefined;
+    try { contextId = localStorage.getItem(CONTEXT_KEY) || undefined; } catch { /* ignore */ }
+    const data = await cloudApi('open', { contextId });
+    try { localStorage.setItem(CONTEXT_KEY, data.contextId); } catch { /* ignore */ }
+    setCloud((prev) => ({ loggedIn: prev?.loggedIn ?? false, sessionId: data.sessionId, liveUrl: data.liveUrl }));
+    return data.sessionId as string;
+  };
+
+  const endCloudSession = () => setCloud((prev) => prev && { loggedIn: prev.loggedIn });
+
+  const connectCloud = () => withBusy('Conectando con Quantcast en la nube… Si aparece la pantalla de login, inicia sesión en la ventana de abajo.', async () => {
+    const sessionId = await openCloudSession();
+    try {
+      const data = await cloudApi('login', { sessionId });
+      setCloud({ loggedIn: data.loggedIn });
+      if (!data.loggedIn) throw new Error('No se completó el inicio de sesión en Quantcast (4,5 min). Vuelve a pulsar «Conectar con Quantcast».');
+    } catch (e) {
+      endCloudSession();
+      throw e;
+    }
+  });
+
+  const closeCloud = () => withBusy('Cerrando el navegador en la nube…', async () => {
+    if (cloud?.sessionId) await cloudApi('end', { sessionId: cloud.sessionId }).catch(() => undefined);
+    setCloud(null);
+  });
+
+  /** Runs the plan one step per request: Vercel functions can't hold a whole run. */
+  const runCloud = async (request: NativeRunRequest) => {
+    if (!cloud?.loggedIn) throw new Error('Conecta primero con Quantcast en la nube.');
+    const steps: RunStep[] = [
+      ...request.creatives.map((c, i): RunStep => ({ id: `c${i}`, kind: 'creative', label: c.name, status: 'pending' })),
+      ...(request.updates || []).map((u, i): RunStep => ({ id: `u${i}`, kind: 'update', label: `${u.name} (ID ${u.creativeId})`, status: 'pending' })),
+      ...request.assignments.map((a, i): RunStep => ({
+        id: `a${i}`, kind: 'assignment', label: `${a.adSetName} ← ${a.creativeNames.length} creatividad(es)`, status: 'pending',
+      })),
+    ];
+    const runId = new Date().toISOString().replace(/[:.]/g, '-');
+    setCloudRun({ runId, status: 'running', dryRun: request.dryRun, steps });
+    cloudStop.current = false;
+    const set = (id: string, patch: Partial<RunStep>) =>
+      setCloudRun((prev) => prev && ({ ...prev, steps: prev.steps.map((s) => (s.id === id ? { ...s, ...patch } : s)) }));
+    const addPopups = (n: number) => n && setCloudRun((prev) => prev && ({ ...prev, popupsClosed: (prev.popupsClosed || 0) + n }));
+    const failedCreatives = new Set<string>();
+
+    let first = true;
+    const exec = async (id: string, step: Record<string, unknown>, label: string) => {
+      set(id, { status: 'running', message: 'Abriendo el navegador en la nube…' });
+      try {
+        // The previous session saves the Context when it ends: give it a moment before reusing it.
+        if (!first) await new Promise((r) => setTimeout(r, 3_000));
+        first = false;
+        const sessionId = await openCloudSession();
+        set(id, { message: label });
+        const r = await cloudApi('step', { sessionId, dryRun: request.dryRun, step });
+        addPopups(r.popupsClosed || 0);
+        set(id, { status: r.status, message: r.message, screenshot: r.screenshot });
+        if (r.loggedOut) {
+          cloudStop.current = true;
+          setCloud({ loggedIn: false });
+          set(id, { message: `${r.message} — Vuelve a pulsar «Conectar con Quantcast».` });
+        }
+        return r.status === 'done';
+      } catch (e: any) {
+        set(id, { status: 'error', message: e?.message || String(e) });
+        return false;
+      } finally {
+        endCloudSession();
+      }
+    };
+
+    for (const [i, job] of request.creatives.entries()) {
+      if (cloudStop.current) break;
+      const ok = await exec(`c${i}`, { kind: 'creative', job, driveToken: request.driveToken },
+        request.dryRun ? 'Rellenando el formulario…' : 'Subiendo y esperando confirmación de Quantcast…');
+      if (!ok) failedCreatives.add(job.name);
+    }
+    for (const [i, job] of (request.updates || []).entries()) {
+      if (cloudStop.current) break;
+      await exec(`u${i}`, { kind: 'update', job }, request.dryRun ? 'Rellenando cambios…' : 'Editando y esperando confirmación de Quantcast…');
+    }
+    for (const [i, job] of request.assignments.entries()) {
+      if (cloudStop.current) break;
+      const missing = job.creativeNames.filter((n) => failedCreatives.has(n));
+      if (missing.length && !request.dryRun) {
+        set(`a${i}`, { status: 'skipped', message: `No se asocia: falló la subida de ${missing.length} creatividad(es).` });
+        continue;
+      }
+      await exec(`a${i}`, { kind: 'assignment', job }, 'Abriendo el ad set…');
+    }
+    setCloudRun((prev) => prev && ({
+      ...prev,
+      status: cloudStop.current ? 'stopped' : 'finished',
+      steps: prev.steps.map((s) => (s.status === 'pending' ? { ...s, status: 'skipped', message: 'Detenido.' } : s)),
+    }));
+  };
+
+  const launch = async (request: NativeRunRequest) => {
+    if (useLocal) {
+      await api('run', request);
+      await refreshStatus();
+    } else {
+      void runCloud(request);
+    }
+  };
+
   const stop = () => withBusy('Deteniendo…', async () => {
-    await api('stop', {});
-    await refreshStatus();
+    if (useLocal) {
+      await api('stop', {});
+      await refreshStatus();
+    } else {
+      // The step in progress finishes on its own; no new step is sent.
+      cloudStop.current = true;
+    }
   });
 
   const advertiserTooLong = advertiser.trim().length > LIMITS.advertiser;
-  const canRun = runner?.available && runner.session && !running && selected.length > 0 && !advertiserTooLong && !busy;
-  const canUpdate = runner?.available && runner.session && !running && selectedUpdates.length > 0 && !advertiserTooLong && !busy;
+  const ready = useLocal ? !!runner?.session : !!cloud?.loggedIn;
+  const canRun = ready && !running && selected.length > 0 && !advertiserTooLong && !busy;
+  const canUpdate = ready && !running && selectedUpdates.length > 0 && !advertiserTooLong && !busy;
 
   return (
     <div className="view-root flex-1 flex flex-col h-full bg-slate-950/40 overflow-y-auto">
@@ -353,8 +512,24 @@ const QuantcastNative: React.FC = () => {
           </div>
           <div className="text-xs">
             {runner === null ? <span className="text-slate-500">Comprobando runner…</span>
-              : !runner.available ? <span className="text-amber-400">Solo funciona en local (npm run dev)</span>
-              : (
+              : !useLocal ? (
+                <div className="flex items-center gap-2">
+                  <span className={cloud?.loggedIn ? 'text-emerald-400' : 'text-slate-400'}>
+                    {cloud?.loggedIn ? 'Conectado a Quantcast (nube)' : 'Navegador en la nube sin conectar'}
+                  </span>
+                  {!cloud?.loggedIn ? (
+                    <button onClick={connectCloud} disabled={!!busy || running}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-2 font-semibold text-white disabled:opacity-40">
+                      <Globe className="w-4 h-4" /> Conectar con Quantcast
+                    </button>
+                  ) : (
+                    <button onClick={closeCloud} disabled={!!busy || running}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-2 font-semibold text-slate-300 hover:border-rose-500/50 disabled:opacity-40">
+                      <XCircle className="w-4 h-4" /> Desconectar
+                    </button>
+                  )}
+                </div>
+              ) : (
                 <div className="flex items-center gap-2">
                   <span className={runner.session ? 'text-emerald-400' : 'text-amber-400'}>
                     {runner.session ? 'Sesión de Quantcast guardada' : 'Sin sesión de Quantcast'}
@@ -373,6 +548,24 @@ const QuantcastNative: React.FC = () => {
         <div className={`mx-4 mt-4 rounded-lg px-4 py-3 text-sm ${error ? 'bg-rose-500/10 text-rose-300 border border-rose-500/30' : 'bg-blue-500/10 text-blue-200 border border-blue-500/30'}`}>
           {error || <span className="inline-flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />{busy}</span>}
         </div>
+      )}
+
+      {cloud?.liveUrl && (
+        <section className="mx-4 mt-4 rounded-xl border border-slate-800 bg-slate-900/40">
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800">
+            <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2"><Globe className="w-4 h-4" />Navegador en la nube (en directo)</h3>
+            {!cloud.loggedIn
+              ? <span className="text-xs text-amber-300">Si ves el login de Quantcast, inicia sesión aquí dentro. Se detecta solo y se recuerda para la próxima vez.</span>
+              : <span className="text-xs text-slate-500">Se abre un navegador por paso. Puedes intervenir haciendo clic dentro.</span>}
+          </div>
+          <iframe
+            title="Navegador en la nube"
+            src={cloud.liveUrl}
+            sandbox="allow-same-origin allow-scripts"
+            allow="clipboard-read; clipboard-write"
+            className="w-full h-[560px] bg-black rounded-b-xl"
+          />
+        </section>
       )}
 
       <div className="px-4 pt-4">
@@ -638,11 +831,11 @@ const QuantcastNative: React.FC = () => {
         </section>
       )}
 
-      {runner?.run && (
+      {activeRun && (
         <section className="mx-4 mb-6 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
           <div className="flex items-center gap-3">
             <h3 className="text-sm font-bold text-slate-200">
-              Ejecución {runner.run.dryRun ? '(prueba)' : ''} · {runner.run.status === 'running' ? 'en marcha' : runner.run.status === 'finished' ? 'terminada' : runner.run.status === 'stopped' ? 'detenida' : 'fallida'}
+              Ejecución {activeRun.dryRun ? '(prueba)' : ''} · {activeRun.status === 'running' ? 'en marcha' : activeRun.status === 'finished' ? 'terminada' : activeRun.status === 'stopped' ? 'detenida' : 'fallida'}
             </h3>
             {running && (
               <button onClick={stop} className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-rose-500/40 px-3 py-1.5 text-xs font-semibold text-rose-300">
@@ -650,12 +843,12 @@ const QuantcastNative: React.FC = () => {
               </button>
             )}
           </div>
-          {runner.run.error && <p className="text-xs text-rose-400 mt-2">{runner.run.error}</p>}
-          {!!runner.run.popupsClosed && (
-            <p className="text-xs text-slate-500 mt-2">Pop-ups de feedback cerrados automáticamente: {runner.run.popupsClosed}</p>
+          {activeRun.error && <p className="text-xs text-rose-400 mt-2">{activeRun.error}</p>}
+          {!!activeRun.popupsClosed && (
+            <p className="text-xs text-slate-500 mt-2">Pop-ups de feedback cerrados automáticamente: {activeRun.popupsClosed}</p>
           )}
           <ul className="mt-3 space-y-2">
-            {runner.run.steps.map((s) => (
+            {activeRun.steps.map((s) => (
               <li key={s.id} className="flex items-start gap-2 text-xs">
                 <StepIcon status={s.status} />
                 <div className="flex-1">
@@ -663,15 +856,23 @@ const QuantcastNative: React.FC = () => {
                   {s.message && <div className="text-slate-500">{s.message}</div>}
                 </div>
                 {s.screenshot && (
-                  <a className="text-blue-400 hover:text-blue-300 shrink-0" target="_blank" rel="noreferrer"
-                    href={`/api/qc-native/screenshot?run=${encodeURIComponent(runner.run!.runId)}&file=${encodeURIComponent(s.screenshot)}`}>
+                  <button className="text-blue-400 hover:text-blue-300 shrink-0"
+                    onClick={() => setShot(s.screenshot!.startsWith('data:')
+                      ? s.screenshot!
+                      : `/api/qc-native/screenshot?run=${encodeURIComponent(activeRun.runId)}&file=${encodeURIComponent(s.screenshot!)}`)}>
                     captura
-                  </a>
+                  </button>
                 )}
               </li>
             ))}
           </ul>
         </section>
+      )}
+
+      {shot && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6" onClick={() => setShot(null)}>
+          <img src={shot} alt="Captura del paso" className="max-w-full max-h-full rounded-lg border border-slate-700" />
+        </div>
       )}
     </div>
   );
