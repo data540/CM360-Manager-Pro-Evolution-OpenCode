@@ -173,7 +173,10 @@ async function startServer() {
       res.status(404).end();
       return;
     }
-    res.sendFile(file);
+    // Screenshots live under `.quantcast/`, which `send` refuses by default as a dotfile path.
+    res.sendFile(file, { dotfiles: "allow" }, (err) => {
+      if (err && !res.headersSent) res.status(404).end();
+    });
   });
 
   // Vite middleware for development

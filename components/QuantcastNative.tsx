@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FileUp, FolderOpen, Image as ImageIcon, Loader2, LogIn, Play, Search, Square, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileUp, FolderOpen, Image as ImageIcon, Loader2, LogIn, PencilLine, Play, Search, Square, XCircle } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getGoogleClientId } from '../constants';
 import { getDriveFolder, getDriveToken, listDriveTree } from '../services/drive';
@@ -9,7 +9,13 @@ import { listAdSetsWithCreatives, listCampaigns, QcCampaignSummary, QcCampaignWi
 import {
   buildAssignments,
   campaignRoot,
+  CHANGE_LABELS,
+  creativeBelongsToPlacement,
   creativeNamesFor,
+  diffNative,
+  NativeChanges,
+  NativeDiff,
+  NativeUpdateJob,
   DriveImage,
   imageIssues,
   LanguageChoice,
@@ -45,6 +51,12 @@ interface RowOverride {
   language?: QcLanguage;
   campaignId?: string;
   adSetId?: string;
+}
+
+interface UpdateRow {
+  plan: PlanRow;
+  targets: { creativeId: string; name: string; diff: NativeDiff }[];
+  problem?: string;
 }
 
 interface PlanRow {
@@ -106,6 +118,8 @@ const QuantcastNative: React.FC = () => {
   const [qcCampaigns, setQcCampaigns] = useState<QcCampaignSummary[] | null>(null);
   const [qcDetails, setQcDetails] = useState<Record<string, QcCampaignWithAdSets>>({});
   const [overrides, setOverrides] = useState<Record<number, RowOverride>>({});
+  const [mode, setMode] = useState<'upload' | 'update'>('upload');
+  const [updateSkip, setUpdateSkip] = useState<Set<string>>(new Set());
   const [runner, setRunner] = useState<RunnerStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -205,7 +219,7 @@ const QuantcastNative: React.FC = () => {
     const blockers = [...row.errors];
     if (!campaignRoot(row.placementName)) blockers.push('El nombre no lleva _prs_ ni _rtg_: no se puede sacar la campaña.');
     if (!language) blockers.push('Elige el idioma.');
-    if (enabledImages.length === 0) blockers.push('Sin imágenes válidas.');
+    if (mode === 'upload' && enabledImages.length === 0) blockers.push('Sin imágenes válidas.');
     if (qcCampaigns && !campaign) blockers.push('Elige la campaña de Quantcast.');
     if (campaign && detail && !adSet) blockers.push('Elige el ad set.');
     if (!qcCampaigns) blockers.push('Falta buscar en Quantcast.');
@@ -228,9 +242,39 @@ const QuantcastNative: React.FC = () => {
       alreadyAssigned,
       include: blockers.length === 0 && (o.include ?? !alreadyAssigned),
     };
-  }), [sheet, overrides, qcCampaigns, qcDetails, enabledImages, folderMarket]);
+  }), [sheet, overrides, qcCampaigns, qcDetails, enabledImages, folderMarket, mode]);
 
   const selected = plan.filter((p) => p.include);
+
+  // Update mode: the creatives of each placement that are live in its ad set, compared with the file.
+  const updatePlan: UpdateRow[] = useMemo(() => {
+    if (mode !== 'update' || !qcCampaigns) return [];
+    return plan.map((p) => {
+      const targets = (p.adSet?.creativeAssignments || [])
+        .filter((a) => !['CREATIVE_ASSIGNMENT_STATE_DELETED', 'CREATIVE_ASSIGNMENT_STATE_UNSPECIFIED'].includes(a.state))
+        .filter((a) => a.creative && creativeBelongsToPlacement(a.creative.name, p.row.placementName))
+        .map((a) => ({
+          creativeId: a.creative!.id,
+          name: a.creative!.name,
+          diff: diffNative({
+            title: p.row.title,
+            description: p.row.description,
+            advertiser: advertiser.trim(),
+            landingUrl: p.row.landingUrl,
+            impressionPixel: p.row.impressionPixel,
+            language: p.language,
+          }, { language: a.creative!.language, native: a.creative!.native }),
+        }));
+      const problem = p.row.errors.length ? p.row.errors.join(' ')
+        : !p.adSet ? (p.blockers.find((b) => /campaña|ad set|_prs_/.test(b)) || 'Sin ad set.')
+        : targets.length === 0 ? 'Ninguna creatividad de este placement está asociada al ad set.' : undefined;
+      return { plan: p, targets, problem };
+    });
+  }, [mode, qcCampaigns, plan, advertiser]);
+
+  const selectedUpdates: NativeUpdateJob[] = updatePlan.flatMap((u) => u.targets
+    .filter((t) => Object.keys(t.diff.changes).length > 0 && !updateSkip.has(t.creativeId))
+    .map((t) => ({ creativeId: t.creativeId, name: t.name, changes: t.diff.changes })));
 
   const setOverride = (rowNumber: number, patch: RowOverride) =>
     setOverrides((prev) => ({ ...prev, [rowNumber]: { ...prev[rowNumber], ...patch } }));
@@ -269,6 +313,17 @@ const QuantcastNative: React.FC = () => {
     await refreshStatus();
   });
 
+  const runUpdates = (dryRun: boolean) => withBusy(dryRun ? 'Lanzando la prueba…' : 'Lanzando la actualización…', async () => {
+    if (!selectedUpdates.length) return;
+    if (!dryRun) {
+      const fields = selectedUpdates.reduce((n, u) => n + Object.keys(u.changes).length, 0);
+      if (!window.confirm(`Se van a editar ${selectedUpdates.length} creatividad(es) en Quantcast (${fields} campo(s) en total). ¿Continuar?`)) return;
+    }
+    const request: NativeRunRequest = { accountId, driveToken: '', dryRun, creatives: [], assignments: [], updates: selectedUpdates };
+    await api('run', request);
+    await refreshStatus();
+  });
+
   const stop = () => withBusy('Deteniendo…', async () => {
     await api('stop', {});
     await refreshStatus();
@@ -276,6 +331,7 @@ const QuantcastNative: React.FC = () => {
 
   const advertiserTooLong = advertiser.trim().length > LIMITS.advertiser;
   const canRun = runner?.available && runner.session && !running && selected.length > 0 && !advertiserTooLong && !busy;
+  const canUpdate = runner?.available && runner.session && !running && selectedUpdates.length > 0 && !advertiserTooLong && !busy;
 
   return (
     <div className="view-root flex-1 flex flex-col h-full bg-slate-950/40 overflow-y-auto">
@@ -319,7 +375,27 @@ const QuantcastNative: React.FC = () => {
         </div>
       )}
 
-      <div className="grid md:grid-cols-2 gap-4 p-4">
+      <div className="px-4 pt-4">
+        <div className="inline-flex rounded-xl border border-slate-700 overflow-hidden">
+          <button onClick={() => setMode('upload')} disabled={running}
+            className={`flex items-center gap-2 px-5 py-2.5 text-sm font-semibold transition-all disabled:opacity-50 ${mode === 'upload' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}`}>
+            <FileUp className="w-4 h-4" /> Subir nuevas creatividades
+          </button>
+          <div className="w-px bg-slate-700 shrink-0" />
+          <button onClick={() => setMode('update')} disabled={running}
+            className={`flex items-center gap-2 px-5 py-2.5 text-sm font-semibold transition-all disabled:opacity-50 ${mode === 'update' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}`}>
+            <PencilLine className="w-4 h-4" /> Actualizar existentes
+          </button>
+        </div>
+        {mode === 'update' && (
+          <p className="text-xs text-slate-500 mt-2">
+            Compara el archivo con lo que hay en Quantcast (Title, Description, Advertiser, Landing URL, Impression Tracker e idioma)
+            y edita solo lo que sea distinto, en las creatividades del placement asociadas a su ad set.
+          </p>
+        )}
+      </div>
+
+      <div className={`grid gap-4 p-4 ${mode === 'upload' ? 'md:grid-cols-2' : ''}`}>
         <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
           <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2"><FileUp className="w-4 h-4" />1. Archivo de tags de CM360</h3>
           <p className="text-xs text-slate-500 mt-1">CSV o XLSX con Placement Name, Click Tag, Impression Tag (image), Title y Description.</p>
@@ -333,7 +409,7 @@ const QuantcastNative: React.FC = () => {
           )}
         </section>
 
-        <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+        {mode === 'upload' && <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
           <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2"><FolderOpen className="w-4 h-4" />2. Imágenes (Drive, 1000x600)</h3>
           <div className="flex gap-2 mt-3">
             <input value={driveLink} onChange={(e) => setDriveLink(e.target.value)} placeholder="Enlace de la carpeta de Drive"
@@ -364,7 +440,7 @@ const QuantcastNative: React.FC = () => {
               )}
             </ul>
           )}
-        </section>
+        </section>}
       </div>
 
       {sheet && sheet.rows.length > 0 && (
@@ -375,17 +451,19 @@ const QuantcastNative: React.FC = () => {
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:border-blue-500/50 disabled:opacity-40">
               <Search className="w-3.5 h-3.5" /> {qcCampaigns ? 'Volver a buscar en Quantcast' : 'Buscar campañas en Quantcast'}
             </button>
-            <label className="flex items-center gap-2 text-xs text-slate-300 ml-auto">
-              <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
-              Sustituir las creatividades actuales del ad set
-            </label>
+            {mode === 'upload' && (
+              <label className="flex items-center gap-2 text-xs text-slate-300 ml-auto">
+                <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
+                Sustituir las creatividades actuales del ad set
+              </label>
+            )}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="text-[10px] uppercase tracking-wider text-slate-500">
                 <tr className="border-b border-slate-800">
-                  <th className="p-2"></th>
-                  <th className="p-2 text-left">Creatividad</th>
+                  {mode === 'upload' && <th className="p-2"></th>}
+                  <th className="p-2 text-left">{mode === 'upload' ? 'Creatividad' : 'Placement'}</th>
                   <th className="p-2 text-left">Title / Description</th>
                   <th className="p-2 text-left">Idioma</th>
                   <th className="p-2 text-left">Campaña Quantcast</th>
@@ -396,12 +474,14 @@ const QuantcastNative: React.FC = () => {
               <tbody>
                 {plan.map((p) => (
                   <tr key={p.row.rowNumber} className="border-b border-slate-800/60 align-top">
-                    <td className="p-2">
-                      <input type="checkbox" checked={p.include} disabled={p.blockers.length > 0}
-                        onChange={(e) => setOverride(p.row.rowNumber, { include: e.target.checked })} />
-                    </td>
+                    {mode === 'upload' && (
+                      <td className="p-2">
+                        <input type="checkbox" checked={p.include} disabled={p.blockers.length > 0}
+                          onChange={(e) => setOverride(p.row.rowNumber, { include: e.target.checked })} />
+                      </td>
+                    )}
                     <td className="p-2 font-mono text-slate-300 max-w-xs break-all">
-                      {p.creativeNames.map((n) => <div key={n}>{n}</div>)}
+                      {mode === 'upload' ? p.creativeNames.map((n) => <div key={n}>{n}</div>) : p.row.placementName}
                     </td>
                     <td className="p-2 max-w-xs">
                       <div className="text-slate-200">{p.row.title} <span className="text-slate-600">({p.row.title.length})</span></div>
@@ -455,15 +535,16 @@ const QuantcastNative: React.FC = () => {
                     <td className="p-2 space-y-0.5">
                       {p.blockers.map((b) => <div key={b} className="text-rose-400">{b}</div>)}
                       {p.row.warnings.map((w) => <div key={w} className="text-amber-400">{w}</div>)}
-                      {p.alreadyAssigned && <div className="text-sky-300">Ya está asignada en el ad set.</div>}
-                      {p.blockers.length === 0 && !p.alreadyAssigned && <div className="text-emerald-400">Lista</div>}
+                      {mode === 'upload' && p.alreadyAssigned && <div className="text-sky-300">Ya está asignada en el ad set.</div>}
+                      {mode === 'upload' && p.blockers.length === 0 && !p.alreadyAssigned && <div className="text-emerald-400">Lista</div>}
+                      {mode === 'update' && p.blockers.length === 0 && <div className="text-emerald-400">Localizada</div>}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <div className="flex flex-wrap items-center gap-3 p-4">
+          {mode === 'upload' && <div className="flex flex-wrap items-center gap-3 p-4">
             <span className="text-xs text-slate-400">{selected.length} de {plan.length} fila(s) seleccionadas</span>
             <button onClick={() => run(true)} disabled={!canRun}
               className="ml-auto inline-flex items-center gap-2 rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-blue-500/50 disabled:opacity-40">
@@ -472,6 +553,86 @@ const QuantcastNative: React.FC = () => {
             <button onClick={() => run(false)} disabled={!canRun}
               className="inline-flex items-center gap-2 rounded-lg bg-violet-600 hover:bg-violet-500 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">
               <Play className="w-4 h-4" /> Subir y asociar en Quantcast
+            </button>
+          </div>}
+        </section>
+      )}
+
+      {mode === 'update' && sheet && sheet.rows.length > 0 && qcCampaigns && (
+        <section className="mx-4 mb-4 rounded-xl border border-slate-800 bg-slate-900/40">
+          <div className="p-4 border-b border-slate-800">
+            <h3 className="text-sm font-bold text-slate-200">4. Cambios detectados</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-[10px] uppercase tracking-wider text-slate-500">
+                <tr className="border-b border-slate-800">
+                  <th className="p-2"></th>
+                  <th className="p-2 text-left">Creatividad en Quantcast</th>
+                  <th className="p-2 text-left">Campo</th>
+                  <th className="p-2 text-left">Ahora en Quantcast</th>
+                  <th className="p-2 text-left">Nuevo (archivo)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {updatePlan.map((u) => (
+                  <React.Fragment key={u.plan.row.rowNumber}>
+                    {u.problem && (
+                      <tr className="border-b border-slate-800/60">
+                        <td className="p-2" />
+                        <td className="p-2 font-mono text-slate-400 break-all">{u.plan.row.placementName}</td>
+                        <td className="p-2 text-amber-400" colSpan={3}>{u.problem}</td>
+                      </tr>
+                    )}
+                    {u.targets.map((t) => {
+                      const keys = Object.keys(t.diff.changes) as (keyof NativeChanges)[];
+                      const checked = keys.length > 0 && !updateSkip.has(t.creativeId);
+                      const rows = keys.length ? keys : [null];
+                      return rows.map((key, i) => (
+                        <tr key={`${t.creativeId}-${key ?? 'none'}`} className={`align-top ${i === rows.length - 1 ? 'border-b border-slate-800/60' : ''}`}>
+                          {i === 0 && (
+                            <>
+                              <td className="p-2" rowSpan={rows.length}>
+                                <input type="checkbox" checked={checked} disabled={keys.length === 0}
+                                  onChange={() => setUpdateSkip((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(t.creativeId)) next.delete(t.creativeId); else next.add(t.creativeId);
+                                    return next;
+                                  })} />
+                              </td>
+                              <td className="p-2 font-mono text-slate-300 break-all max-w-xs" rowSpan={rows.length}>
+                                {t.name}
+                                <div className="text-slate-600">ID {t.creativeId}</div>
+                                {t.diff.notes.map((n) => <div key={n} className="text-amber-400 font-sans">{n}</div>)}
+                              </td>
+                            </>
+                          )}
+                          {key ? (
+                            <>
+                              <td className="p-2 text-slate-300 whitespace-nowrap">{CHANGE_LABELS[key]}</td>
+                              <td className="p-2 text-rose-300/80 break-all max-w-sm">{t.diff.before[key] || <span className="text-slate-600">(vacío)</span>}</td>
+                              <td className="p-2 text-emerald-300 break-all max-w-sm">{String(t.diff.changes[key])}</td>
+                            </>
+                          ) : (
+                            <td className="p-2 text-slate-500" colSpan={3}>Sin cambios: coincide con el archivo.</td>
+                          )}
+                        </tr>
+                      ));
+                    })}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 p-4">
+            <span className="text-xs text-slate-400">{selectedUpdates.length} creatividad(es) a editar</span>
+            <button onClick={() => runUpdates(true)} disabled={!canUpdate}
+              className="ml-auto inline-flex items-center gap-2 rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-blue-500/50 disabled:opacity-40">
+              <Play className="w-4 h-4" /> Prueba (cambia sin guardar)
+            </button>
+            <button onClick={() => runUpdates(false)} disabled={!canUpdate}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">
+              <PencilLine className="w-4 h-4" /> Aplicar cambios en Quantcast
             </button>
           </div>
         </section>
@@ -498,7 +659,7 @@ const QuantcastNative: React.FC = () => {
               <li key={s.id} className="flex items-start gap-2 text-xs">
                 <StepIcon status={s.status} />
                 <div className="flex-1">
-                  <div className="font-mono text-slate-300 break-all">{s.kind === 'assignment' ? 'Asociar: ' : 'Subir: '}{s.label}</div>
+                  <div className="font-mono text-slate-300 break-all">{s.kind === 'assignment' ? 'Asociar: ' : s.kind === 'update' ? 'Editar: ' : 'Subir: '}{s.label}</div>
                   {s.message && <div className="text-slate-500">{s.message}</div>}
                 </div>
                 {s.screenshot && (

@@ -51,6 +51,15 @@ export interface QcCampaignSummary {
   state: string;
 }
 
+export interface QcNativeData {
+  title?: string | null;
+  description?: string | null;
+  /** Shown as "Advertiser" in the Quantcast UI. */
+  sponsored?: string | null;
+  landingUrl?: string | null;
+  impressionTrackerUrl?: (string | null)[] | null;
+}
+
 export interface QcCampaignWithAdSets extends QcCampaignSummary {
   adsets: {
     id: string;
@@ -60,7 +69,15 @@ export interface QcCampaignWithAdSets extends QcCampaignSummary {
       creativeId: string;
       targetingType: string;
       state: string;
-      creative?: { id: string; name: string; type: string; display?: { adServerTag?: { html?: string } } };
+      creative?: {
+        id: string;
+        name: string;
+        type: string;
+        display?: { adServerTag?: { html?: string } };
+        /** ISO code, e.g. `es`. */
+        language?: string;
+        native?: QcNativeData | null;
+      };
     }[];
   }[];
 }
@@ -113,7 +130,11 @@ export const listAdSetsWithCreatives = async (
               pageInfo { hasMore }
               edges {
                 creativeId targetingType state
-                creative { id name type display { adServerTag { html } } }
+                creative {
+                  id name type language
+                  display { adServerTag { html } }
+                  native { title description sponsored landingUrl impressionTrackerUrl }
+                }
               }
             }
           }
@@ -144,6 +165,8 @@ export const listAdSetsWithCreatives = async (
               name: ca.creative.name,
               type: ca.creative.type,
               display: ca.creative.display,
+              language: ca.creative.language,
+              native: ca.creative.native,
             } : undefined,
           })),
         };

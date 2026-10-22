@@ -3,8 +3,11 @@ import assert from 'node:assert/strict';
 import {
   buildAssignments,
   campaignRoot,
+  creativeBelongsToPlacement,
   creativeNamesFor,
   detectLanguage,
+  diffNative,
+  languageFromCode,
   extractImgSrc,
   imageIssues,
   matchAdSet,
@@ -167,6 +170,43 @@ test('audience-extension placements go to the rtg campaign and ad set even when 
     { id: 'pd', name: 'ae-es_kpi360_ao_2026_nat_prs_quantcast_desktop' },
   ];
   assert.equal(matchAdSet(ae, adSets).match?.id, 'rd');
+});
+
+test('creativeBelongsToPlacement accepts the exact name and the _vN variants only', () => {
+  const p = `TEST DAVID ${PLACEMENT}`;
+  assert.ok(creativeBelongsToPlacement(p, p));
+  assert.ok(creativeBelongsToPlacement(p.replace('_1x1_421530992', '_1x1_v2_421530992'), p));
+  assert.ok(!creativeBelongsToPlacement(p.replace('421530992', '421530995'), p));
+  assert.ok(!creativeBelongsToPlacement(p.replace('_gen_', '_audience-extension_'), p));
+});
+
+test('diffNative lists only the fields that differ from Quantcast', () => {
+  const current = {
+    language: 'es',
+    native: {
+      title: 'Johannesburgo ahora más cerca',
+      description: 'Vuela a Johannesburgo desde 348€ trayecto',
+      sponsored: 'Air Europa',
+      landingUrl: CLICK,
+      impressionTrackerUrl: [PIXEL],
+    },
+  };
+  const desired = {
+    title: 'Johannesburgo ahora más cerca ',
+    description: 'Vuela a Johannesburgo desde 299€ trayecto',
+    advertiser: 'Air Europa',
+    landingUrl: CLICK,
+    impressionPixel: PIXEL,
+    language: 'Spanish' as const,
+  };
+  const diff = diffNative(desired, current);
+  assert.deepEqual(diff.changes, { description: 'Vuela a Johannesburgo desde 299€ trayecto' });
+  assert.equal(diff.before.description, 'Vuela a Johannesburgo desde 348€ trayecto');
+  const lang = diffNative({ ...desired, language: 'English' }, { ...current, native: { ...current.native, impressionTrackerUrl: [PIXEL, 'https://x'] } });
+  assert.equal(lang.changes.language, 'English');
+  assert.equal(lang.before.language, 'Spanish');
+  assert.equal(lang.notes.length, 1);
+  assert.equal(languageFromCode('ES'), 'Spanish');
 });
 
 test('buildAssignments edits each ad set once with all its creatives', () => {

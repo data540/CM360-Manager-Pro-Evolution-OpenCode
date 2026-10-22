@@ -326,6 +326,99 @@ export const matchAdSet = <T extends QcNamed>(placementName: string, adSets: T[]
   return { match: scored[0] && !tie ? scored[0].a : undefined, candidates: scored.map((s) => s.a) };
 };
 
+// --- Updating existing creatives -------------------------------------------------------------
+
+const LANGUAGE_CODES: Record<QcLanguage, string> = {
+  Spanish: 'es', English: 'en', Portuguese: 'pt', French: 'fr', Italian: 'it', German: 'de', Dutch: 'nl',
+};
+
+export const languageFromCode = (code?: string | null): QcLanguage | undefined =>
+  QC_LANGUAGES.find((l) => LANGUAGE_CODES[l] === String(code || '').toLowerCase());
+
+/** The placement's own name, or the `_vN` variant created when several images were uploaded. */
+export const creativeBelongsToPlacement = (creativeName: string, placementName: string): boolean => {
+  const c = creativeName.trim();
+  const p = placementName.trim();
+  if (c === p) return true;
+  const match = p.match(/^(.*)_(\d+)$/);
+  if (!match) return false;
+  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escape(match[1])}_v\\d+_${match[2]}$`).test(c);
+};
+
+export interface NativeChanges {
+  title?: string;
+  description?: string;
+  advertiser?: string;
+  landingUrl?: string;
+  impressionPixel?: string;
+  language?: QcLanguage;
+}
+
+export const CHANGE_LABELS: Record<keyof NativeChanges, string> = {
+  title: 'Title',
+  description: 'Description',
+  advertiser: 'Advertiser',
+  landingUrl: 'Landing URL',
+  impressionPixel: 'Impression Tracker',
+  language: 'Language',
+};
+
+export interface CurrentNative {
+  language?: string | null;
+  native?: {
+    title?: string | null;
+    description?: string | null;
+    sponsored?: string | null;
+    landingUrl?: string | null;
+    impressionTrackerUrl?: (string | null)[] | null;
+  } | null;
+}
+
+export interface NativeDiff {
+  changes: NativeChanges;
+  /** Current value of each changed field, for display. */
+  before: Partial<Record<keyof NativeChanges, string>>;
+  notes: string[];
+}
+
+const same = (a?: string | null, b?: string | null) => (a || '').trim() === (b || '').trim();
+
+/** Fields of the file that differ from what the creative has in Quantcast now. */
+export const diffNative = (
+  desired: { title: string; description: string; advertiser: string; landingUrl: string; impressionPixel: string; language?: QcLanguage },
+  current: CurrentNative,
+): NativeDiff => {
+  const n = current.native || {};
+  const changes: NativeChanges = {};
+  const before: NativeDiff['before'] = {};
+  const notes: string[] = [];
+  const check = (key: keyof NativeChanges, wanted: string | undefined, now: string | null | undefined) => {
+    if (wanted === undefined || wanted.trim() === '' || same(wanted, now)) return;
+    (changes as any)[key] = wanted.trim();
+    before[key] = (now || '').trim();
+  };
+  check('title', desired.title, n.title);
+  check('description', desired.description, n.description);
+  check('advertiser', desired.advertiser, n.sponsored);
+  check('landingUrl', desired.landingUrl, n.landingUrl);
+  const trackers = (n.impressionTrackerUrl || []).filter((t): t is string => !!t);
+  check('impressionPixel', desired.impressionPixel, trackers[0]);
+  if (trackers.length > 1) notes.push(`Tiene ${trackers.length} impression trackers: solo se compara y cambia el primero.`);
+  const currentLanguage = languageFromCode(current.language);
+  if (desired.language && desired.language !== currentLanguage) {
+    changes.language = desired.language;
+    before.language = currentLanguage || String(current.language || '—');
+  }
+  return { changes, before, notes };
+};
+
+export interface NativeUpdateJob {
+  creativeId: string;
+  name: string;
+  changes: NativeChanges;
+}
+
 // --- Runner contract ------------------------------------------------------------------------
 
 export interface NativeCreativeJob {
@@ -352,13 +445,15 @@ export interface NativeRunRequest {
   dryRun: boolean;
   creatives: NativeCreativeJob[];
   assignments: NativeAssignmentJob[];
+  /** Edits of creatives that already exist in Quantcast. */
+  updates?: NativeUpdateJob[];
 }
 
 export type RunStepStatus = 'pending' | 'running' | 'done' | 'error' | 'skipped';
 
 export interface RunStep {
   id: string;
-  kind: 'creative' | 'assignment';
+  kind: 'creative' | 'assignment' | 'update';
   label: string;
   status: RunStepStatus;
   message?: string;

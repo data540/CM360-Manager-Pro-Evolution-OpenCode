@@ -6,8 +6,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Browser, Page } from 'playwright';
-import { findQuantcastCreativeIds } from '../api/_quantcast';
-import type { NativeAssignmentJob, NativeCreativeJob, NativeRunRequest, QcLanguage, RunState, RunStep } from '../services/quantcastNative';
+import { findQuantcastCreativeIds, getQuantcastNativeCreative } from '../api/_quantcast';
+import { CHANGE_LABELS, diffNative } from '../services/quantcastNative';
+import type {
+  NativeAssignmentJob,
+  NativeCreativeJob,
+  NativeRunRequest,
+  NativeUpdateJob,
+  QcLanguage,
+  RunState,
+  RunStep,
+} from '../services/quantcastNative';
 
 const DIR = path.resolve('.quantcast');
 const AUTH_FILE = path.join(DIR, 'auth.json');
@@ -114,13 +123,18 @@ const installPopupGuards = async (page: Page, onClosed: () => void) => {
 // the DOM at a time, so the wheel has to scroll the list holder (not the field, which also has
 // title="English") until the wanted option is rendered.
 const selectLanguage = async (page: Page, language: QcLanguage) => {
-  await page.locator('.matter-select-selection-item[title="English"]').first().click();
+  const field = page.getByTestId('form-field-language').locator('.matter-select-selector');
+  if (await field.count()) await field.first().click();
+  else await page.locator('.matter-select-selection-item[title="English"]').first().click();
   const holder = page.locator('.matter-select-dropdown:not(.matter-select-dropdown-hidden) .rc-virtual-list-holder').first();
   const option = page.locator(`.matter-select-item-option[title="${language}"]`).first();
   await holder.hover();
-  for (let i = 0; i < 60 && !(await option.isVisible().catch(() => false)); i++) {
-    await page.mouse.wheel(0, 120);
-    await page.waitForTimeout(100);
+  // The list opens scrolled to the current value, so the wanted one may be above or below it.
+  for (const delta of [120, -120]) {
+    for (let i = 0; i < 60 && !(await option.isVisible().catch(() => false)); i++) {
+      await page.mouse.wheel(0, delta);
+      await page.waitForTimeout(100);
+    }
   }
   if (!(await option.isVisible().catch(() => false))) {
     throw new Error(`No encuentro «${language}» en el desplegable de idioma de Quantcast.`);
@@ -179,6 +193,64 @@ const waitForCreative = async (accountId: string, name: string): Promise<string>
     const ids = await findQuantcastCreativeIds(accountId, name).catch(() => []);
     if (ids.length) return ids[ids.length - 1];
     if (Date.now() > deadline) throw new Error('Quantcast cerró el formulario pero la creatividad no aparece creada tras 60 s.');
+    await new Promise((r) => setTimeout(r, 2_000));
+  }
+};
+
+/** Edits an existing native creative (found by its ID in the library) and confirms the result via the API. */
+const updateCreative = async (page: Page, accountId: string, job: NativeUpdateJob, dryRun: boolean) => {
+  await page.goto(`${CREATIVES}/${accountId}/creatives`);
+  assertLoggedIn(page);
+  await page.getByPlaceholder('Search for a creative').fill(job.name);
+  const idText = page.getByText(`Creative Id: ${job.creativeId}`, { exact: true });
+  await idText.waitFor({ timeout: STEP_TIMEOUT_MS }).catch(() => {
+    throw new Error(`No encuentro la creatividad ${job.creativeId} en la librería de Quantcast.`);
+  });
+  await idText.hover();
+  await idText.locator('xpath=ancestor::*[.//*[normalize-space(text())="edit"]][1]').getByText('edit', { exact: true }).first().click();
+
+  const titleField = page.getByPlaceholder('Please enter the title');
+  await titleField.waitFor({ timeout: STEP_TIMEOUT_MS });
+  const drawer = titleField.locator('xpath=ancestor::*[.//button[normalize-space(.)="Save"]][1]');
+  const c = job.changes;
+  if (c.title !== undefined) await titleField.fill(c.title);
+  if (c.description !== undefined) await page.getByPlaceholder('Please enter the description').fill(c.description);
+  if (c.advertiser !== undefined) await page.getByPlaceholder('Please enter the advertiser').fill(c.advertiser);
+  if (c.landingUrl !== undefined) await page.getByPlaceholder('https://www.example.com/mypage').fill(c.landingUrl);
+  if (c.language !== undefined) await selectLanguage(page, c.language);
+  if (c.impressionPixel !== undefined) await page.getByPlaceholder('Please enter an image pixel').first().fill(c.impressionPixel);
+
+  if (dryRun) {
+    await drawer.getByRole('button', { name: 'Cancel', exact: true }).click().catch(() => undefined);
+    return 'Campos cambiados en el formulario (prueba: se cancela sin guardar).';
+  }
+  await drawer.getByRole('button', { name: 'Save', exact: true }).click();
+  await titleField.waitFor({ state: 'detached', timeout: 60_000 }).catch(async () => {
+    const alerts = await page.locator('[role="alert"], [class*="error" i]').allInnerTexts().catch(() => []);
+    throw new Error(`Quantcast no aceptó los cambios${alerts.length ? `: ${alerts.join(' | ').slice(0, 300)}` : ' (el formulario sigue abierto).'}`);
+  });
+
+  // Same reason as for uploads: the drawer closes before the save completes. Confirm against the API.
+  const deadline = Date.now() + CONFIRM_TIMEOUT_MS;
+  for (;;) {
+    const current = await getQuantcastNativeCreative(accountId, job.creativeId).catch(() => undefined);
+    if (current) {
+      const n = current.native || {};
+      const pending = diffNative({
+        title: c.title ?? '',
+        description: c.description ?? '',
+        advertiser: c.advertiser ?? '',
+        landingUrl: c.landingUrl ?? '',
+        impressionPixel: c.impressionPixel ?? '',
+        language: c.language,
+      }, { language: current.language, native: n });
+      if (Object.keys(pending.changes).length === 0) return `${Object.keys(c).length} campo(s) actualizado(s) y confirmado(s).`;
+      if (Date.now() > deadline) {
+        throw new Error(`Guardado, pero Quantcast no refleja: ${Object.keys(pending.changes).map((k) => CHANGE_LABELS[k as keyof typeof CHANGE_LABELS]).join(', ')}.`);
+      }
+    } else if (Date.now() > deadline) {
+      throw new Error('No se pudo comprobar el resultado en la API de Quantcast.');
+    }
     await new Promise((r) => setTimeout(r, 2_000));
   }
 };
@@ -254,6 +326,9 @@ export const startRun = (request: NativeRunRequest): RunState => {
   fs.mkdirSync(runDir, { recursive: true });
   const steps: RunStep[] = [
     ...request.creatives.map((c, i): RunStep => ({ id: `c${i}`, kind: 'creative', label: c.name, status: 'pending' })),
+    ...(request.updates || []).map((u, i): RunStep => ({
+      id: `u${i}`, kind: 'update', label: `${u.name} (ID ${u.creativeId})`, status: 'pending',
+    })),
     ...request.assignments.map((a, i): RunStep => ({
       id: `a${i}`, kind: 'assignment', label: `${a.adSetName} ← ${a.creativeNames.length} creatividad(es)`, status: 'pending',
     })),
@@ -308,6 +383,18 @@ export const startRun = (request: NativeRunRequest): RunState => {
         } catch (e: any) {
           failedCreatives.add(job.name);
           set(id, { status: 'error', message: e?.message || String(e), screenshot: await capture(page, `error-${job.name}`) });
+        }
+      }
+
+      for (const [i, job] of (request.updates || []).entries()) {
+        if (stopRequested) break;
+        const id = `u${i}`;
+        set(id, { status: 'running', message: request.dryRun ? 'Rellenando cambios…' : 'Editando y esperando confirmación de Quantcast…' });
+        try {
+          const message = await updateCreative(page, request.accountId, job, request.dryRun);
+          set(id, { status: 'done', message, screenshot: await capture(page, `update-${job.name}`) });
+        } catch (e: any) {
+          set(id, { status: 'error', message: e?.message || String(e), screenshot: await capture(page, `error-update-${job.name}`) });
         }
       }
 

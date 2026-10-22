@@ -103,6 +103,32 @@ export const findQuantcastCreativeIds = async (accountId: string, name: string):
   return edges.filter((c: any) => c.name === name).map((c: any) => String(c.id));
 };
 
+/** Current native fields of one creative (language as ISO code). Server-side only (no caller check). */
+export const getQuantcastNativeCreative = async (accountId: string, creativeId: string) => {
+  const qcToken = await getQuantcastToken();
+  const res = await fetch(QUANTCAST_GRAPHQL_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${qcToken}` },
+    body: JSON.stringify({
+      query: `query($id: Long!, $creativeId: Long!) {
+        accounts(filter: { id: { eq: $id } }) {
+          edges { creatives(limit: 1, filter: { id: { eq: $creativeId } }) {
+            edges { id name language native { title description sponsored landingUrl impressionTrackerUrl } }
+          } }
+        }
+      }`,
+      variables: { id: Number(accountId), creativeId: Number(creativeId) },
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.errors) {
+    throw new Error(`Quantcast: ${data?.errors?.[0]?.message || res.statusText}`);
+  }
+  return data?.data?.accounts?.edges?.[0]?.creatives?.edges?.[0] as
+    | { id: number; name: string; language?: string; native?: Record<string, any> | null }
+    | undefined;
+};
+
 export const handleQuantcastGraphql = async (req: any, res: any) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: { message: 'Solo se admite POST.' } });
