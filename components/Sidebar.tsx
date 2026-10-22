@@ -9,6 +9,7 @@ import {
   Megaphone,
   FileSpreadsheet,
   FolderInput,
+  Newspaper,
   Settings as SettingsIcon,
   ChevronDown,
   Circle,
@@ -130,6 +131,7 @@ const Sidebar: React.FC = () => {
     { type: 'AuditQuantcast', icon: Radar, label: 'Audit Quantcast' },
     { type: 'FormatReport', icon: FileSpreadsheet, label: 'Formatos pendientes' },
     { type: 'TrafficFolder', icon: FolderInput, label: 'Traficar desde carpeta' },
+    { type: 'QuantcastNative', icon: Newspaper, label: 'Quantcast Nativa' },
     { type: 'Settings', icon: SettingsIcon, label: 'Settings' },
   ];
 

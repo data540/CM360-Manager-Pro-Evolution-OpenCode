@@ -80,6 +80,29 @@ const getQuantcastToken = async (): Promise<string> => {
   return cachedToken.value;
 };
 
+/** IDs of the account's creatives named exactly `name`. Server-side only (no caller check). */
+export const findQuantcastCreativeIds = async (accountId: string, name: string): Promise<string[]> => {
+  const qcToken = await getQuantcastToken();
+  const res = await fetch(QUANTCAST_GRAPHQL_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${qcToken}` },
+    body: JSON.stringify({
+      query: `query($id: Long!, $name: String!) {
+        accounts(filter: { id: { eq: $id } }) {
+          edges { creatives(limit: 100, filter: { name: { eq: $name } }) { edges { id name } } }
+        }
+      }`,
+      variables: { id: Number(accountId), name },
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.errors) {
+    throw new Error(`Quantcast: ${data?.errors?.[0]?.message || res.statusText}`);
+  }
+  const edges = data?.data?.accounts?.edges?.[0]?.creatives?.edges || [];
+  return edges.filter((c: any) => c.name === name).map((c: any) => String(c.id));
+};
+
 export const handleQuantcastGraphql = async (req: any, res: any) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: { message: 'Solo se admite POST.' } });

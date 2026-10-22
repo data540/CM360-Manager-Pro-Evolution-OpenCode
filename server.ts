@@ -5,6 +5,15 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import cors from "cors";
 import { handleQuantcastGraphql } from "./api/_quantcast";
+import {
+  getRunState,
+  hasSession,
+  isRunning,
+  loginInteractively,
+  screenshotPath,
+  startRun,
+  stopRun,
+} from "./server/quantcastNativeRunner";
 
 // `tsx` runs this file directly, without Vite's own .env loading, so local secrets
 // (QUANTCAST_API_KEY, etc.) from .env.local would otherwise never reach process.env.
@@ -114,6 +123,58 @@ async function startServer() {
 
   // Quantcast is NOT a dumb proxy: it holds its own secret and checks the caller first (see api/_quantcast.ts).
   app.use("/api/quantcast/graphql", (req, res) => handleQuantcastGraphql(req, res));
+
+  // Quantcast native runner: drives a real Chrome with the user's Quantcast session, so it only
+  // answers this machine (the server listens on 0.0.0.0) and this app's own origin (cors() above
+  // would otherwise let any website the user visits call it).
+  const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+  const ownOrigins = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]);
+  app.use("/api/qc-native", (req, res, next) => {
+    const origin = req.headers.origin;
+    if (!LOOPBACK.has(req.socket.remoteAddress || "") || (origin && !ownOrigins.has(origin))) {
+      res.status(403).json({ error: { message: "Solo disponible desde la app en este ordenador." } });
+      return;
+    }
+    next();
+  });
+  let loginInProgress = false;
+  app.get("/api/qc-native/status", (_req, res) => {
+    res.json({ available: true, session: hasSession(), loginInProgress, run: getRunState() });
+  });
+  app.post("/api/qc-native/login", express.json(), async (req, res) => {
+    if (loginInProgress || isRunning()) {
+      res.status(409).json({ error: { message: "Ya hay una ventana de Quantcast abierta." } });
+      return;
+    }
+    loginInProgress = true;
+    try {
+      await loginInteractively(String(req.body?.accountId || "9964009").replace(/\D/g, ""));
+      res.json({ session: true });
+    } catch (error: any) {
+      res.status(500).json({ error: { message: `No se completó el inicio de sesión: ${error?.message || error}` } });
+    } finally {
+      loginInProgress = false;
+    }
+  });
+  app.post("/api/qc-native/run", express.json({ limit: "5mb" }), (req, res) => {
+    try {
+      res.json(startRun(req.body));
+    } catch (error: any) {
+      res.status(409).json({ error: { message: error?.message || String(error) } });
+    }
+  });
+  app.post("/api/qc-native/stop", async (_req, res) => {
+    await stopRun();
+    res.json({ stopped: true });
+  });
+  app.get("/api/qc-native/screenshot", (req, res) => {
+    const file = screenshotPath(String(req.query.run || ""), String(req.query.file || ""));
+    if (!file) {
+      res.status(404).end();
+      return;
+    }
+    res.sendFile(file);
+  });
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

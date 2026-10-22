@@ -10,6 +10,7 @@ import TraffickingAudit from './components/TraffickingAudit';
 import QuantcastAudit from './components/QuantcastAudit';
 import FormatReportView from './components/FormatReportView';
 import TrafficFromFolder from './components/TrafficFromFolder';
+import QuantcastNative from './components/QuantcastNative';
 import Login from './components/Login';
 import SettingsPanel from './components/SettingsPanel';
 import { ChevronRight, LogOut } from 'lucide-react';
@@ -122,6 +123,8 @@ const MainContent: React.FC<{ theme: 'dark' | 'light'; onThemeChange: (theme: 'd
         return <FormatReportView />;
       case 'TrafficFolder':
         return <TrafficFromFolder />;
+      case 'QuantcastNative':
+        return <QuantcastNative />;
       case 'Settings':
         return <SettingsPanel theme={theme} onThemeChange={onThemeChange} />;
       default:
