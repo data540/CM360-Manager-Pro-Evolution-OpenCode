@@ -14,6 +14,7 @@ import { formatDateToken } from '../services/trafficPlan';
 import { CompleteExecutionLog, executeCompletePlan, initialCompleteLog } from '../services/trafficExecutorComplete';
 import { mergeTrackingFiles, readTrackingBytes, readTrackingFile, TrackingFile, withSource } from '../services/trackingSheet';
 import { MARKETS } from '../services/markets';
+import CampaignPicker from './CampaignPicker';
 
 const LAST_LINK_KEY = 'traffic_folder_last_link';
 
@@ -1547,15 +1548,13 @@ const TrafficFromFolder: React.FC = () => {
                       {group.market && (
                         <div className="ml-auto flex items-center gap-2">
                           {state?.loading && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
-                          <select
+                          <CampaignPicker
+                            campaigns={campaignOptions}
                             value={state?.campaignId || ''}
                             disabled={!!(execLogs[key] || fullExecLogs[key] || completeExecLogs[key])}
-                            onChange={(e) => chooseCampaign(group, e.target.value)}
-                            className="w-80 max-w-full bg-slate-950 border border-slate-700 rounded-lg py-1.5 px-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
-                          >
-                            <option value="">Elegir campaña de {group.market.advertiserName}…</option>
-                            {campaignOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                          </select>
+                            onChange={(id) => chooseCampaign(group, id)}
+                            placeholder={`Buscar campaña de ${group.market.advertiserName}…`}
+                          />
                         </div>
                       )}
                     </div>
