@@ -23,7 +23,7 @@ const P728 = placement('p2', 'ae-es_kpi360_navidad_2026_dis_prs_site1_desktop_ge
 const P300_S2 = placement('p3', 'ae-es_kpi360_navidad_2026_dis_prs_site2_desktop_gen_300x250_3', '300x250', { siteId: 's2' });
 
 const options = (extra: Partial<CompleteOptions> = {}): CompleteOptions => ({
-  prefix: '', suffix: '', includeDate: false, uploadDate: DATE, siteIds: new Set(),
+  prefix: '', suffix: '', includeDate: false, uploadDate: DATE,
   setAsDefault: true, createMissingDefaultAds: true, defaultMode: 'replace', standardMode: 'add', ...extra,
 });
 
@@ -145,4 +145,10 @@ test('creative schedule is clamped to the Ad window and rejected when nothing is
   assert.deepEqual([out[0].startTime, out[0].endTime], [adStart, '2026-12-24T22:59:59.000Z']);
   assert.equal(out[1].startTime, 'old', 'creatives without dates are left as they are');
   assert.throws(() => applyCreativeSchedule(assignments, { '1': { startTime: '2027-02-01T00:00:00.000Z' } }, adStart, adEnd), /no caben/);
+});
+
+test('no site selected means nothing is trafficked (not "every site")', () => {
+  const plan = buildCompletePlan(input({ options: options({ siteIds: new Set() }) }));
+  assert.equal(plan.rows.length, 0);
+  assert.equal(plan.actions.length, 0);
 });

@@ -83,7 +83,7 @@ test('complete plan: Ads of the support get the tracking URL; untouched Ads only
     ads: [{ id: 'a3', name: 'ad_old', isDefault: false, active: true, placementIds: ['p3'] }],
     sites: [],
     options: {
-      prefix: '', suffix: '', includeDate: false, uploadDate: new Date(), siteIds: new Set(),
+      prefix: '', suffix: '', includeDate: false, uploadDate: new Date(),
       setAsDefault: true, createMissingDefaultAds: true, defaultMode: 'replace', standardMode: 'add', trackingRules: rules,
     },
   });
@@ -105,7 +105,7 @@ test('a support named differently from CM360 is an error, with the closest name 
     ads: [],
     sites: [],
     options: {
-      prefix: '', suffix: '', includeDate: false, uploadDate: new Date(), siteIds: new Set(),
+      prefix: '', suffix: '', includeDate: false, uploadDate: new Date(),
       setAsDefault: false, createMissingDefaultAds: false, defaultMode: 'replace', standardMode: 'add', trackingRules: rules,
     },
   });

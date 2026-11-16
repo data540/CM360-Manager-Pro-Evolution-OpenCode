@@ -13,8 +13,8 @@ export interface CompleteOptions {
   suffix: string;
   includeDate: boolean;
   uploadDate: Date;
-  /** Sites whose placements are trafficked. Empty = every site of the campaign. */
-  siteIds: Set<string>;
+  /** Sites whose placements are trafficked. Undefined = every site of the campaign; an empty set = none. */
+  siteIds?: Set<string>;
   /** Also put the creatives in the Default Ads of each placement. */
   setAsDefault: boolean;
   /** Create a Default Ad on matched placements that have none (needs `setAsDefault`). */
@@ -142,7 +142,7 @@ export const buildCompletePlan = (input: CompletePlanInput): CompletePlan => {
   }
 
   const siteName = new Map(sites.map((s) => [s.id, s.name]));
-  const inSites = (p: PlanPlacement) => options.siteIds.size === 0 || options.siteIds.has(p.siteId);
+  const inSites = (p: PlanPlacement) => !options.siteIds || options.siteIds.has(p.siteId);
   const candidatePlacements = placements.filter((p) => p.active && inSites(p));
   const dateToken = options.includeDate ? formatDateToken(options.uploadDate) : '';
   const countryRules = (options.trackingRules || []).filter((r) => r.country && r.country === input.folderMarket?.code);

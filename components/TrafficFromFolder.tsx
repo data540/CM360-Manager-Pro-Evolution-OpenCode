@@ -1078,7 +1078,7 @@ const TrafficFromFolder: React.FC = () => {
           suffix: namingSuffix,
           includeDate: includeDateC,
           uploadDate,
-          siteIds: siteSelectionsC[key] || new Set(),
+          siteIds: siteSelectionsC[key],
           setAsDefault: setAsDefaultC,
           createMissingDefaultAds: setAsDefaultC && createMissingDefaultC,
           defaultMode: defaultModeC,
@@ -1506,16 +1506,17 @@ const TrafficFromFolder: React.FC = () => {
                     {/* Mode C content */}
                     {trafficMode === 'complete' && !state?.data && <FileTable files={group.files} />}
                     {trafficMode === 'complete' && state?.data && (() => {
-                      const siteSelection = siteSelectionsC[key] || new Set<string>();
+                      // No entry = every site (also ones added later); a Set = exactly those, possibly none.
+                      const siteSelection = siteSelectionsC[key];
                       const siteNames = new Map<string, string>(state.data.sites.map((s) => [s.id, s.name]));
                       const campaignSiteIds = [...new Set<string>(state.data.placements.filter((p) => p.active).map((p) => p.siteId))]
                         .sort((a, b) => (siteNames.get(a) || a).localeCompare(siteNames.get(b) || b));
                       const toggleSite = (siteId: string, checked: boolean) =>
                         setSiteSelectionsC((prev) => {
-                          const next = new Set(prev[key]?.size ? prev[key] : campaignSiteIds);
+                          const next = new Set(prev[key] ?? campaignSiteIds);
                           if (checked) next.add(siteId); else next.delete(siteId);
-                          // All checked is stored as an empty set (= every site, also new ones).
-                          return { ...prev, [key]: campaignSiteIds.every((id) => next.has(id)) ? new Set() : next };
+                          const { [key]: _current, ...rest } = prev;
+                          return campaignSiteIds.every((id) => next.has(id)) ? rest : { ...rest, [key]: next };
                         });
                       return (
                         <>
@@ -1528,12 +1529,15 @@ const TrafficFromFolder: React.FC = () => {
                                   <label key={siteId} className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none">
                                     <input
                                       type="checkbox"
-                                      checked={siteSelection.size === 0 || siteSelection.has(siteId)}
+                                      checked={!siteSelection || siteSelection.has(siteId)}
                                       onChange={(e) => toggleSite(siteId, e.target.checked)}
                                     />
                                     {siteNames.get(siteId) || `Site ${siteId}`}
                                   </label>
                                 ))}
+                                {siteSelection?.size === 0 && campaignSiteIds.length > 0 && (
+                                  <span className="text-xs text-amber-400">Elige al menos un site para traficar.</span>
+                                )}
                               </div>
                               {planC && setAsDefaultC && planC.needsSetChoice && planC.sets.length > 1 && (
                                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
