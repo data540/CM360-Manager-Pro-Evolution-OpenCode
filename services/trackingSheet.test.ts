@@ -146,3 +146,39 @@ test('xlsx with hidden template sheets first: the visible sheet with data is use
   assert.equal(parsed.sheetName, 'Trafficking_BF_Nov26 Alkimiads');
   assert.deepEqual(parsed.rules.map((r) => [r.row, r.support, r.country]), [[20, 'Alkimiads', 'MX']]);
 });
+
+test('several files (one per support): rules keep their file, same row numbers do not collide, conflicts are flagged', async () => {
+  const { mergeTrackingFiles, withSource, ruleKey, describeRule } = await import('./trackingSheet');
+  const csv = (support: string, country: string, url: string) => [
+    'Nombre de soporte;Nombre de campaña;x;x;x;x;x;x;x;x;x;x;URL de clic (por redirección)',
+    `${support};BF_Nov26_${country}_ES;;;;;;;;;;;${url}`,
+  ].join('\n');
+  const alk = withSource('Alkimiads.xlsx', parseTrackingRows(readCsvRows(csv('Alkimiads', 'CO', 'https://a.example/1')), CODES));
+  const conf = withSource('ElConfidencial.xlsx', parseTrackingRows(readCsvRows(csv('elconfidencial', 'CO', 'https://e.example/1')), CODES));
+  const dup = withSource('Alkimiads_v2.xlsx', parseTrackingRows(readCsvRows(csv('Alkimiads', 'CO', 'https://a.example/2')), CODES));
+
+  const merged = mergeTrackingFiles([{ fileName: 'Alkimiads.xlsx', sheet: alk }, { fileName: 'ElConfidencial.xlsx', sheet: conf }]);
+  assert.equal(merged.rules.length, 2);
+  assert.notEqual(ruleKey(merged.rules[0]), ruleKey(merged.rules[1]), 'same row in two files → different keys');
+  assert.equal(describeRule(merged.rules[1]), 'ElConfidencial.xlsx · fila 2');
+  assert.deepEqual(merged.conflicts, []);
+  assert.equal(findTrackingRule(merged.rules, 'CO', { name: 'ae-co_x_elconfidencial_300x250' })?.clickUrl, 'https://e.example/1');
+
+  const withDup = mergeTrackingFiles([{ fileName: 'Alkimiads.xlsx', sheet: alk }, { fileName: 'Alkimiads_v2.xlsx', sheet: dup }]);
+  assert.equal(withDup.conflicts.length, 1);
+  assert.match(withDup.conflicts[0], /Alkimiads CO.*Alkimiads\.xlsx · fila 2 y Alkimiads_v2\.xlsx · fila 2/);
+  assert.equal(findTrackingRule(withDup.rules, 'CO', { name: 'x_alkimiads_300x250' })?.clickUrl, 'https://a.example/1', 'first file wins');
+});
+
+test('tracking spreadsheets in the Drive folder are kept apart from the creatives', async () => {
+  const { groupDriveFiles } = await import('./driveFolders');
+  const entry = (name: string, path: string[], mimeType = 'image/png') => ({ id: name, name, mimeType, path, bytes: 10 });
+  const result = groupDriveFiles('BF Nov26', [
+    entry('Colombia', [], 'application/vnd.google-apps.folder'),
+    entry('banner_300x250.png', ['Colombia']),
+    entry('Trafficking_BF_Nov26 Alkimiads.xlsx', ['Colombia'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+    entry('Tracking El Confidencial', [], 'application/vnd.google-apps.spreadsheet'),
+  ] as any);
+  assert.deepEqual(result.trackingFiles.map((f) => f.name), ['Trafficking_BF_Nov26 Alkimiads.xlsx', 'Tracking El Confidencial']);
+  assert.deepEqual(result.groups.flatMap((g) => g.files.map((f) => f.fileName)), ['banner_300x250.png']);
+});

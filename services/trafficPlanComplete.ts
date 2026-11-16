@@ -5,7 +5,7 @@
 
 import type { DetectedFile } from './creativeDetection';
 import { marketOfCampaign, type Market } from './markets';
-import { findTrackingRule, placementMatchesSupport, similarSupportName, type TrackingRule } from './trackingSheet';
+import { describeRule, findTrackingRule, placementMatchesSupport, ruleKey, similarSupportName, type TrackingRule } from './trackingSheet';
 import { formatDateToken, matchesFile, placementFamily, type PlanAd, type PlanIssue, type PlanPlacement } from './trafficPlan';
 
 export interface CompleteOptions {
@@ -72,7 +72,7 @@ export interface CompleteRow {
   standard: { action: RowAction; adNames: string[] };
   default: { action: RowAction; adNames: string[] };
   /** Tracking-file click URL for this placement, and the support that matched it. */
-  landing?: { url: string; support: string; row: number };
+  landing?: { url: string; support: string; row: number; key: string; source?: string };
 }
 
 export interface CreativeSet {
@@ -148,7 +148,7 @@ export const buildCompletePlan = (input: CompletePlanInput): CompletePlan => {
   const countryRules = (options.trackingRules || []).filter((r) => r.country && r.country === input.folderMarket?.code);
   const landingFor = (p: PlanPlacement) => {
     const rule = countryRules.length ? findTrackingRule(countryRules, input.folderMarket?.code, p, siteName.get(p.siteId)) : undefined;
-    return rule ? { url: rule.clickUrl, support: rule.support, row: rule.row } : undefined;
+    return rule ? { url: rule.clickUrl, support: rule.support, row: rule.row, key: ruleKey(rule), source: rule.source } : undefined;
   };
 
   // 1. Creatives: every usable file matched by size (and device) to the selected placements.
@@ -352,16 +352,16 @@ export const buildCompletePlan = (input: CompletePlanInput): CompletePlan => {
 
   // Supports of this country in the tracking file. The support must be named exactly as in CM360
   // (placement name token or site name): otherwise it is an error, with the closest name as a hint.
-  const matchedRows = new Set(rows.map((r) => r.landing?.row).filter(Boolean));
+  const matchedRows = new Set(rows.map((r) => r.landing?.key).filter(Boolean));
   const campaignNames = placements.map((p) => ({ name: p.name, siteName: siteName.get(p.siteId) }));
   countryRules.forEach((rule) => {
-    if (matchedRows.has(rule.row)) return;
+    if (matchedRows.has(ruleKey(rule))) return;
     const anyPlacement = campaignNames.some((p) => placementMatchesSupport(p.name, p.siteName, rule.support));
     if (anyPlacement) {
       issues.push({
         severity: 'warning',
         code: 'unmatched_file',
-        message: `Tracking fila ${rule.row} (${rule.support}): sus placements no tienen creatividad nueva ni Ad activo (o no están en los sites elegidos), no se cambia su landing.`,
+        message: `Tracking ${describeRule(rule)} (${rule.support}): sus placements no tienen creatividad nueva ni Ad activo (o no están en los sites elegidos), no se cambia su landing.`,
       });
       return;
     }
@@ -370,8 +370,8 @@ export const buildCompletePlan = (input: CompletePlanInput): CompletePlan => {
       severity: 'error',
       code: 'tracking_support_mismatch',
       message: similar
-        ? `Tracking fila ${rule.row}: el soporte «${rule.support}» no se llama igual que en CM360 («${similar}»). Corrige el nombre en el archivo: su URL no se aplica.`
-        : `Tracking fila ${rule.row}: ningún placement de la campaña es del soporte «${rule.support}». Revisa el nombre en el archivo: su URL no se aplica.`,
+        ? `Tracking ${describeRule(rule)}: el soporte «${rule.support}» no se llama igual que en CM360 («${similar}»). Corrige el nombre en el archivo: su URL no se aplica.`
+        : `Tracking ${describeRule(rule)}: ningún placement de la campaña es del soporte «${rule.support}». Revisa el nombre en el archivo: su URL no se aplica.`,
     });
   });
 

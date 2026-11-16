@@ -8,6 +8,10 @@ import { unzipSync, strFromU8 } from 'fflate';
 export interface TrackingRule {
   /** Row number in the sheet (1-based), for messages. */
   row: number;
+  /** File the rule comes from (one file per support is common: up to ~15 files at once). */
+  source?: string;
+  /** Unique across files: `<source>#<row>`. */
+  id?: string;
   support: string;
   /** ISO-like market code, e.g. `CO`. Undefined if no code could be read. */
   country?: string;
@@ -215,8 +219,12 @@ export const parseTrackingXlsx = (bytes: Uint8Array, knownCodes?: Set<string>): 
   return { rules: [], skipped: [] };
 };
 
-export const readTrackingFile = async (file: File, knownCodes?: Set<string>): Promise<TrackingSheet> => {
-  const bytes = new Uint8Array(await file.arrayBuffer());
+export const readTrackingFile = async (file: File, knownCodes?: Set<string>): Promise<TrackingSheet> =>
+  readTrackingBytes(new Uint8Array(await file.arrayBuffer()), file.name, knownCodes);
+
+/** Same as readTrackingFile, for bytes downloaded from Drive. */
+export const readTrackingBytes = (bytes: Uint8Array, fileName: string, knownCodes?: Set<string>): TrackingSheet => {
+  const file = { name: fileName };
   const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b;
   if (isZip) return parseTrackingXlsx(bytes, knownCodes);
   if (/\.xls$/i.test(file.name)) throw new Error('El formato .xls antiguo no se admite: guarda el archivo como .xlsx.');
@@ -268,4 +276,49 @@ export const findTrackingRule = (
 ): TrackingRule | undefined => {
   const candidates = rules.filter((r) => r.country === country && placementMatchesSupport(placement.name, siteName, r.support));
   return candidates.find((r) => placement.size && r.format === placement.size) || candidates[0];
+};
+
+// ─── Several files (often one per support) ────────────────────────────────────
+
+export interface TrackingFile {
+  fileName: string;
+  sheet: TrackingSheet;
+}
+
+/** Stable key of a rule even when several files share row numbers. */
+export const ruleKey = (rule: TrackingRule) => rule.id || `${rule.source || ''}#${rule.row}`;
+
+/** `Alkimiads.xlsx · fila 21` (or just `fila 21` for a rule without source). */
+export const describeRule = (rule: TrackingRule) => `${rule.source ? `${rule.source} · ` : ''}fila ${rule.row}`;
+
+/** Tags every rule and warning of a parsed file with its file name. */
+export const withSource = (fileName: string, sheet: TrackingSheet): TrackingSheet => ({
+  ...sheet,
+  rules: sheet.rules.map((r) => ({ ...r, source: fileName, id: `${fileName}#${r.row}` })),
+  skipped: sheet.skipped.map((s) => ({ ...s, reason: `${fileName}: ${s.reason}` })),
+});
+
+export interface MergedTracking {
+  rules: TrackingRule[];
+  /** Same support + country + format with different URLs (the first one loaded wins). */
+  conflicts: string[];
+}
+
+/** All rules of all files, in load order, flagging contradictory URLs. */
+export const mergeTrackingFiles = (files: TrackingFile[]): MergedTracking => {
+  const rules = files.flatMap((f) => f.sheet.rules);
+  const firstByKey = new Map<string, TrackingRule>();
+  const conflicts: string[] = [];
+  rules.forEach((rule) => {
+    if (!rule.country) return;
+    const key = `${norm(rule.support)}|${rule.country}|${rule.format}`;
+    const first = firstByKey.get(key);
+    if (!first) firstByKey.set(key, rule);
+    else if (first.clickUrl !== rule.clickUrl) {
+      conflicts.push(
+        `${rule.support} ${rule.country}${rule.format ? ` ${rule.format}` : ''}: URLs distintas en ${describeRule(first)} y ${describeRule(rule)}. Se usa la primera.`,
+      );
+    }
+  });
+  return { rules, conflicts };
 };

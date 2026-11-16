@@ -41,7 +41,15 @@ export interface DriveFolderResult {
   unknownFolders: string[];
   /** Files skipped as system junk (`__MACOSX`, `._*`, `.DS_Store`…). */
   ignored: number;
+  /** Tracking spreadsheets (.xlsx / .csv / Google Sheets) found anywhere in the folder: not creatives. */
+  trackingFiles: DriveEntry[];
 }
+
+export const GOOGLE_SHEET_MIME = 'application/vnd.google-apps.spreadsheet';
+
+/** Spreadsheets the client sends with the click URLs (one per support is common). */
+export const isTrackingSheetEntry = (entry: Pick<DriveEntry, 'name' | 'mimeType'>) =>
+  /\.(xlsx|csv)$/i.test(entry.name) || entry.mimeType === GOOGLE_SHEET_MIME;
 
 const JUNK_FILES = new Set(['.ds_store', 'thumbs.db', 'desktop.ini']);
 
@@ -90,11 +98,13 @@ export const detectDriveFile = (entry: DriveEntry): DetectedFile => {
 /** Groups the files of the shared folder by country. */
 export const groupDriveFiles = (rootName: string, entries: DriveEntry[]): DriveFolderResult => {
   const allFiles = entries.filter((e) => e.mimeType !== DRIVE_FOLDER_MIME);
-  const files = allFiles.filter((e) => !isJunkEntry(e));
-  const ignored = allFiles.length - files.length;
+  const usable = allFiles.filter((e) => !isJunkEntry(e));
+  const ignored = allFiles.length - usable.length;
+  const trackingFiles = usable.filter(isTrackingSheetEntry);
+  const files = usable.filter((e) => !isTrackingSheetEntry(e));
   const rootMarket = detectMarketFromFolder(rootName);
   if (rootMarket) {
-    return { groups: [{ market: rootMarket, folderName: rootName, files: files.map(detectDriveFile) }], unknownFolders: [], ignored };
+    return { groups: [{ market: rootMarket, folderName: rootName, files: files.map(detectDriveFile) }], unknownFolders: [], ignored, trackingFiles };
   }
 
   // Keyed by market code for country folders (two folders of one country merge), by the
@@ -116,6 +126,7 @@ export const groupDriveFiles = (rootName: string, entries: DriveEntry[]): DriveF
     groups: sorted,
     unknownFolders: sorted.filter((g) => g.folderName && !g.market).map((g) => g.folderName),
     ignored,
+    trackingFiles,
   };
 };
 

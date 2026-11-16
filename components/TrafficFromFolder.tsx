@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, FileSpreadsheet, FileText, Fo
 import { useApp } from '../context/AppContext';
 import { getGoogleClientId } from '../constants';
 import type { DetectedFile } from '../services/creativeDetection';
-import { getDriveFolder, getDriveToken, listDriveTree } from '../services/drive';
+import { downloadDriveSpreadsheet, getDriveFolder, getDriveToken, listDriveTree } from '../services/drive';
 import { CountryGroup, DriveFolderResult, groupDriveFiles, parseDriveFolderId } from '../services/driveFolders';
 import { buildTrafficPlan, PlanAd, PlanPlacement, TrafficPlan } from '../services/trafficPlan';
 import { executePlan, ExecutionLog, StepStatus } from '../services/trafficExecutor';
@@ -12,7 +12,7 @@ import { executeFullPlan, FullExecutionLog, initialFullLog } from '../services/t
 import { buildCompletePlan, buildPrefixedCreativeName, CompleteOptions, CompletePlan, CreativeDates, RowAction } from '../services/trafficPlanComplete';
 import { formatDateToken } from '../services/trafficPlan';
 import { CompleteExecutionLog, executeCompletePlan, initialCompleteLog } from '../services/trafficExecutorComplete';
-import { readTrackingFile, TrackingSheet } from '../services/trackingSheet';
+import { mergeTrackingFiles, readTrackingBytes, readTrackingFile, TrackingFile, withSource } from '../services/trackingSheet';
 import { MARKETS } from '../services/markets';
 
 const LAST_LINK_KEY = 'traffic_folder_last_link';
@@ -864,21 +864,47 @@ const TrafficFromFolder: React.FC = () => {
   const [creativeDatesC, setCreativeDatesC] = useState<Record<string, Record<string, CreativeDates>>>({});
   const [completeExecLogs, setCompleteExecLogs] = useState<Record<string, CompleteExecutionLog>>({});
   const [completeConfirmKey, setCompleteConfirmKey] = useState<string | null>(null);
-  const [tracking, setTracking] = useState<{ fileName: string; sheet: TrackingSheet } | null>(null);
-  const [trackingError, setTrackingError] = useState<string | null>(null);
+  // Tracking spreadsheets: uploaded by hand and/or found in the Drive folder (often one per support).
+  const [trackingFiles, setTrackingFiles] = useState<(TrackingFile & { fromDrive?: boolean })[]>([]);
+  const [trackingErrors, setTrackingErrors] = useState<string[]>([]);
+  const [loadingTracking, setLoadingTracking] = useState(false);
   const [showTrackingSkipped, setShowTrackingSkipped] = useState(false);
+  const mergedTracking = useMemo(() => mergeTrackingFiles(trackingFiles), [trackingFiles]);
+  const trackingWarnings = useMemo(
+    () => [...mergedTracking.conflicts, ...trackingFiles.flatMap((f) => f.sheet.skipped.map((s) => s.reason))],
+    [mergedTracking, trackingFiles],
+  );
+  const marketCodes = useMemo(() => new Set(MARKETS.map((m) => m.code)), []);
 
-  const loadTrackingFile = async (file?: File) => {
-    if (!file) return;
-    setTrackingError(null);
-    try {
-      const sheet = await readTrackingFile(file, new Set(MARKETS.map((m) => m.code)));
-      if (sheet.rules.length === 0) throw new Error('No hay ninguna fila con soporte y URL de clic (por redirección).');
-      setTracking({ fileName: file.name, sheet });
-    } catch (e: any) {
-      setTracking(null);
-      setTrackingError(`No se pudo leer ${file.name}: ${e?.message || 'formato no reconocido'}`);
-    }
+  /** Adds parsed files, replacing any already loaded with the same name. */
+  const addTrackingFiles = (loaded: (TrackingFile & { fromDrive?: boolean })[], errors: string[]) => {
+    setTrackingFiles((prev) => {
+      const names = new Set(loaded.map((f) => f.fileName));
+      return [...prev.filter((f) => !names.has(f.fileName)), ...loaded];
+    });
+    setTrackingErrors(errors);
+  };
+
+  const parseTracking = (fileName: string, sheet: TrackingFile['sheet']) => {
+    if (sheet.rules.length === 0) throw new Error('no hay ninguna fila con soporte y URL de clic (por redirección).');
+    return { fileName, sheet: withSource(fileName, sheet) };
+  };
+
+  const loadTrackingFiles = async (files: File[]) => {
+    if (!files.length) return;
+    setLoadingTracking(true);
+    const loaded: TrackingFile[] = [];
+    const errors: string[] = [];
+    await Promise.all(files.map(async (file) => {
+      try {
+        loaded.push(parseTracking(file.name, await readTrackingFile(file, marketCodes)));
+      } catch (e: any) {
+        errors.push(`No se pudo leer ${file.name}: ${e?.message || 'formato no reconocido'}`);
+      }
+    }));
+    loaded.sort((a, b) => a.fileName.localeCompare(b.fileName));
+    addTrackingFiles(loaded, errors);
+    setLoadingTracking(false);
   };
 
   const [progress, setProgress] = useState<string | null>(null);
@@ -944,6 +970,25 @@ const TrafficFromFolder: React.FC = () => {
       const root = await getDriveFolder(token, folderId);
       const result = groupDriveFiles(root.name, await listDriveTree(token, folderId));
       try { localStorage.setItem(LAST_LINK_KEY, link.trim()); } catch { /* ignore */ }
+
+      // Tracking spreadsheets in the folder replace the ones read from a previous folder.
+      setTrackingFiles((prev) => prev.filter((f) => !f.fromDrive));
+      if (result.trackingFiles.length) {
+        setProgress(`Leyendo ${result.trackingFiles.length} archivo${result.trackingFiles.length === 1 ? '' : 's'} de tracking de la carpeta…`);
+        const loaded: (TrackingFile & { fromDrive: boolean })[] = [];
+        const errors: string[] = [];
+        await Promise.all(result.trackingFiles.map(async (entry) => {
+          const fileName = entry.mimeType === 'application/vnd.google-apps.spreadsheet' ? `${entry.name}.xlsx` : entry.name;
+          try {
+            const sheet = readTrackingBytes(await downloadDriveSpreadsheet(token, entry), fileName, marketCodes);
+            loaded.push({ ...parseTracking(fileName, sheet), fromDrive: true });
+          } catch (e: any) {
+            errors.push(`No se pudo leer ${fileName} (Drive): ${e?.message || 'formato no reconocido'}`);
+          }
+        }));
+        loaded.sort((a, b) => a.fileName.localeCompare(b.fileName));
+        addTrackingFiles(loaded, errors);
+      }
 
       setProgress('Leyendo las campañas de cada país en CM360…');
       const advertiserIds = [...new Set(result.groups.map((g) => g.market?.advertiserId).filter((id): id is string => !!id))];
@@ -1084,14 +1129,14 @@ const TrafficFromFolder: React.FC = () => {
           defaultMode: defaultModeC,
           standardMode: standardModeC,
           defaultSetKey: defaultSetKeysC[key],
-          trackingRules: tracking?.sheet.rules,
+          trackingRules: mergedTracking.rules,
           creativeDates: creativeDatesC[key],
         },
       });
     });
     return out;
   }, [folder, groupStates, campaignsByAdvertiser, trafficMode, namingPrefix, namingSuffix, includeDateC, siteSelectionsC,
-    setAsDefaultC, createMissingDefaultC, defaultModeC, standardModeC, defaultSetKeysC, tracking, creativeDatesC]);
+    setAsDefaultC, createMissingDefaultC, defaultModeC, standardModeC, defaultSetKeysC, mergedTracking, creativeDatesC]);
 
   const runCompleteExecution = async (group: CountryGroup, plan: CompletePlan) => {
     const key = groupKey(group);
@@ -1342,43 +1387,75 @@ const TrafficFromFolder: React.FC = () => {
                 <span className="flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-widest text-slate-500">
                   <Link2 className="w-3.5 h-3.5" /> Landings
                 </span>
-                <label className={`inline-flex items-center gap-2 rounded-lg border border-fuchsia-500/40 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 px-3 py-1.5 text-xs font-semibold text-fuchsia-200 ${anyRunning ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}>
-                  <FileSpreadsheet className="w-4 h-4" />
-                  {tracking ? 'Cambiar archivo de tracking' : 'Subir archivo de tracking (.xlsx)'}
+                <label className={`inline-flex items-center gap-2 rounded-lg border border-fuchsia-500/40 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 px-3 py-1.5 text-xs font-semibold text-fuchsia-200 ${anyRunning || loadingTracking ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}>
+                  {loadingTracking ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+                  {trackingFiles.length ? 'Añadir archivos de tracking' : 'Subir archivos de tracking (.xlsx)'}
                   <input
                     type="file"
                     accept=".xlsx,.csv"
+                    multiple
                     className="hidden"
-                    onChange={(e) => { loadTrackingFile(e.target.files?.[0]); e.target.value = ''; }}
+                    onChange={(e) => { loadTrackingFiles(Array.from(e.target.files || [])); e.target.value = ''; }}
                   />
                 </label>
-                {tracking && (
+                {trackingFiles.length > 0 && (
                   <>
                     <span className="text-slate-300">
-                      <span className="font-mono">{tracking.fileName}</span>
-                      {tracking.sheet.sheetName && <span className="text-slate-500"> (hoja «{tracking.sheet.sheetName}»)</span>}
-                      {' · '}{tracking.sheet.rules.length} URL{tracking.sheet.rules.length === 1 ? '' : 's'}
-                      {' · '}soportes: {[...new Set(tracking.sheet.rules.map((r) => r.support))].join(', ')}
-                      {' · '}países: {[...new Set(tracking.sheet.rules.map((r) => r.country).filter(Boolean))].join(', ')}
+                      {trackingFiles.length} archivo{trackingFiles.length === 1 ? '' : 's'}
+                      {' · '}{mergedTracking.rules.length} URL{mergedTracking.rules.length === 1 ? '' : 's'}
+                      {' · '}soportes: {[...new Set(mergedTracking.rules.map((r) => r.support))].join(', ')}
+                      {' · '}países: {[...new Set(mergedTracking.rules.map((r) => r.country).filter(Boolean))].join(', ')}
                     </span>
-                    {tracking.sheet.skipped.length > 0 && (
+                    {trackingWarnings.length > 0 && (
                       <button onClick={() => setShowTrackingSkipped((v) => !v)} className="text-amber-300 hover:underline">
-                        {tracking.sheet.skipped.length} fila{tracking.sheet.skipped.length === 1 ? '' : 's'} con avisos
+                        {trackingWarnings.length} aviso{trackingWarnings.length === 1 ? '' : 's'}
                       </button>
                     )}
-                    <button onClick={() => setTracking(null)} disabled={anyRunning} title="Quitar archivo" className="text-slate-500 hover:text-slate-200">
-                      <X className="w-4 h-4" />
+                    <button onClick={() => setTrackingFiles([])} disabled={anyRunning} className="text-slate-500 hover:text-slate-200">
+                      Quitar todos
                     </button>
                   </>
                 )}
-                {!tracking && !trackingError && (
-                  <span className="text-slate-500">Opcional: la «URL de clic (por redirección)» de cada soporte y país pasa a ser la landing de sus Ads.</span>
+                {trackingFiles.length === 0 && trackingErrors.length === 0 && (
+                  <span className="text-slate-500">
+                    Opcional: déjalos en la carpeta de Drive (se leen solos) o súbelos aquí, varios a la vez (p. ej. uno por soporte). La «URL de clic (por redirección)» de cada soporte y país pasa a ser la landing de sus Ads.
+                  </span>
                 )}
-                {trackingError && <span className="text-rose-300">{trackingError}</span>}
               </div>
-              {tracking && showTrackingSkipped && (
+              {trackingFiles.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {trackingFiles.map((f) => (
+                    <span
+                      key={f.fileName}
+                      title={f.sheet.sheetName ? `Hoja «${f.sheet.sheetName}»` : undefined}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-900/70 pl-2 pr-1 py-0.5 text-slate-300"
+                    >
+                      {f.fromDrive && <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-400">Drive</span>}
+                      <span className="font-mono">{f.fileName}</span>
+                      <span className="text-slate-500">
+                        {[...new Set(f.sheet.rules.map((r) => r.support))].join(', ')} · {f.sheet.rules.length} URL{f.sheet.rules.length === 1 ? '' : 's'}
+                      </span>
+                      {f.sheet.skipped.length > 0 && <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />}
+                      <button
+                        onClick={() => setTrackingFiles((prev) => prev.filter((p) => p.fileName !== f.fileName))}
+                        disabled={anyRunning}
+                        title="Quitar este archivo"
+                        className="text-slate-500 hover:text-slate-200"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {trackingErrors.length > 0 && (
+                <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-2 space-y-0.5">
+                  {trackingErrors.map((msg) => <p key={msg} className="text-rose-300">{msg}</p>)}
+                </div>
+              )}
+              {trackingFiles.length > 0 && showTrackingSkipped && trackingWarnings.length > 0 && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 space-y-0.5">
-                  {tracking.sheet.skipped.map((sk) => <p key={sk.row} className="text-amber-200/80">{sk.reason}</p>)}
+                  {trackingWarnings.map((msg, i) => <p key={i} className="text-amber-200/80">{msg}</p>)}
                 </div>
               )}
             </div>

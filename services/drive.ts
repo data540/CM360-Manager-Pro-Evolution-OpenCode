@@ -124,6 +124,16 @@ export const listDriveTree = async (token: string, folderId: string, path: strin
   return entries;
 };
 
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+/** A tracking spreadsheet as bytes: .xlsx/.csv as they are, Google Sheets exported to .xlsx. */
+export const downloadDriveSpreadsheet = async (token: string, entry: { id: string; mimeType: string }): Promise<Uint8Array> => {
+  const res = entry.mimeType === 'application/vnd.google-apps.spreadsheet'
+    ? await driveFetch(token, `files/${entry.id}/export`, { mimeType: XLSX_MIME })
+    : await driveFetch(token, `files/${entry.id}`, { alt: 'media' });
+  return new Uint8Array(await res.arrayBuffer());
+};
+
 /** Downloads a file's content (used for HTML5 zips and, later, for the upload to CM360). */
 export const downloadDriveFile = async (token: string, fileId: string): Promise<Blob> =>
   (await driveFetch(token, `files/${fileId}`, { alt: 'media' })).blob();
