@@ -333,7 +333,9 @@ const CreativeBulkEditPanel: React.FC<CreativeBulkEditPanelProps> = ({ onClose, 
       show: true,
       type: result.failed === 0 ? 'success' : 'error',
       message: result.failed === 0 ? `Published ${result.success} creatives` : `Published ${result.success}, failed ${result.failed}`,
-      details: result.failed > 0 ? (result.results.find((r) => !r.success)?.error || 'CM360 rejected one or more updates.') : undefined,
+      details: result.failed > 0
+        ? (result.results.find((r) => !r.success)?.error || 'CM360 rejected one or more updates.')
+        : result.notes?.length ? result.notes.join(' · ') : undefined,
     });
 
     if (result.failed === 0) {
@@ -609,7 +611,7 @@ const CreativeBulkEditPanel: React.FC<CreativeBulkEditPanelProps> = ({ onClose, 
                     </div>
                   </div>
                 )}
-                <p className="pl-7 text-[9px] text-slate-600 mt-2">Applied to the Start Time of every Ad this creative is assigned to in CM360.</p>
+                <p className="pl-7 text-[9px] text-slate-600 mt-2">Applied to this creative inside every standard Ad it is assigned to (the Ad and its other creatives keep their dates; Default Ads are not scheduled). Local time; adjusted to each Ad's dates if needed.</p>
               </div>
 
               {/* End Date */}
@@ -628,7 +630,7 @@ const CreativeBulkEditPanel: React.FC<CreativeBulkEditPanelProps> = ({ onClose, 
                     />
                   </div>
                 )}
-                <p className="pl-7 text-[9px] text-slate-600 mt-2">Applied to the End Time of every Ad this creative is assigned to in CM360.</p>
+                <p className="pl-7 text-[9px] text-slate-600 mt-2">Applied to this creative inside every standard Ad it is assigned to, until 23:59 local time (the Ad and its other creatives keep their dates; Default Ads are not scheduled). Adjusted to each Ad's dates if needed.</p>
               </div>
 
               {/* Landing Page */}

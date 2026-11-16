@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { Advertiser, Campaign, Placement, Creative, Ad, ViewType, Site, Status } from '../types';
 import { MOCK_ADVERTISERS, MOCK_CAMPAIGNS, MOCK_PLACEMENTS, MOCK_CREATIVES, MOCK_SITES, getForcedDefaultAdLanding, DEFAULT_CLIENT_ID } from '../constants';
+import { localDateTimeToIso, scheduleCreativeInAds } from '../services/creativeSchedule';
 
 interface UserProfile {
   name: string;
@@ -52,7 +53,7 @@ interface AppContextType {
   deletePlacement: (id: string) => void;
   publishSelectedDrafts: (placementIds: string[]) => Promise<{success: number, failed: number, results: {id: string, success: boolean, error?: string}[]}>;
   publishSelectedAdDrafts: (adIds: string[]) => Promise<{success: number, failed: number, results: {id: string, success: boolean, error?: string}[]}>;
-  publishSelectedCreativeDrafts: (creativeIds: string[]) => Promise<{success: number, failed: number, results: {id: string, success: boolean, error?: string}[]}>;
+  publishSelectedCreativeDrafts: (creativeIds: string[]) => Promise<{success: number, failed: number, results: {id: string, success: boolean, error?: string}[], notes?: string[]}>;
   
   connectionStatus: 'Connected' | 'Disconnected' | 'Connecting';
   isAuthenticated: boolean;
@@ -2243,6 +2244,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     let successCount = 0;
     let failedCount = 0;
     const results: {id: string, success: boolean, error?: string}[] = [];
+    const scheduleNotes: string[] = [];
 
     for (const id of creativeIds) {
       const draft = creativesDrafts[id];
@@ -2443,106 +2445,30 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         }
 
-        if (changedEndDate && creativePatchSuccess) {
-          const creativeAds = ads.filter((ad) => ad.creativeIds.includes(id));
-
-          if (creativeAds.length === 0) {
-            endDatePatchSuccess = false;
-            lastError = 'No ads linked to this creative. End Date is applied to Ads in CM360.';
+        // Dates live on this creative's assignment inside each Ad (not on the Ad itself, which
+        // would move every other creative of the Ad and fail with CM360 error 12049).
+        if ((changedEndDate || changedStartDate) && creativePatchSuccess) {
+          const schedule = await scheduleCreativeInAds({
+            profileId,
+            accessToken,
+            creativeId: id,
+            startTime: changedStartDate && nextStartDate ? localDateTimeToIso(nextStartDate, nextStartTime) : undefined,
+            endTime: changedEndDate && nextEndDate ? localDateTimeToIso(nextEndDate, undefined, true) : undefined,
+          });
+          if (schedule.errors.length > 0) {
+            endDatePatchSuccess = !changedEndDate;
+            startDatePatchSuccess = !changedStartDate;
+            lastError = schedule.errors.join(' · ');
           } else {
-            const isoEndTime = `${nextEndDate}T23:59:59.000Z`;
-
-            for (const ad of creativeAds) {
-              const patchAttempts = [
-                {
-                  url: `/api/cm360/userprofiles/${profileId}/ads/${ad.id}?updateMask=endTime`,
-                  body: { id: ad.id, endTime: isoEndTime }
-                },
-                {
-                  url: `/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(ad.id)}`,
-                  body: { id: ad.id, endTime: isoEndTime }
-                }
-              ];
-
-              let adPatched = false;
-              for (const patchAttempt of patchAttempts) {
-                const adRes = await fetch(patchAttempt.url, {
-                  method: 'PATCH',
-                  headers: {
-                    Authorization: `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify(patchAttempt.body)
-                });
-
-                if (adRes.ok) {
-                  adPatched = true;
-                  break;
-                }
-
-                const adData = await adRes.json().catch(() => ({}));
-                lastError = adData?.error?.message || `Ad end date update failed (${adRes.status}: ${adRes.statusText})`;
-              }
-
-              if (!adPatched) {
-                endDatePatchSuccess = false;
-                break;
-              }
+            endDatePatchSuccess = true;
+            startDatePatchSuccess = true;
+            if (schedule.clampedAds.length > 0) {
+              scheduleNotes.push(`${nextName}: fechas ajustadas a las del Ad en ${schedule.clampedAds.join(', ')}`);
             }
           }
-        } else if (changedEndDate && !creativePatchSuccess) {
-          endDatePatchSuccess = false;
-        }
-
-        if (changedStartDate && creativePatchSuccess) {
-          const creativeAds = ads.filter((ad) => ad.creativeIds.includes(id));
-
-          if (creativeAds.length === 0) {
-            startDatePatchSuccess = false;
-            lastError = 'No ads linked to this creative. Start Date is applied to Ads in CM360.';
-          } else {
-            const isoStartTime = `${nextStartDate}T${nextStartTime}:00.000Z`;
-
-            for (const ad of creativeAds) {
-              const patchAttempts = [
-                {
-                  url: `/api/cm360/userprofiles/${profileId}/ads/${ad.id}?updateMask=startTime`,
-                  body: { id: ad.id, startTime: isoStartTime }
-                },
-                {
-                  url: `/api/cm360/userprofiles/${profileId}/ads?id=${encodeURIComponent(ad.id)}`,
-                  body: { id: ad.id, startTime: isoStartTime }
-                }
-              ];
-
-              let adPatched = false;
-              for (const patchAttempt of patchAttempts) {
-                const adRes = await fetch(patchAttempt.url, {
-                  method: 'PATCH',
-                  headers: {
-                    Authorization: `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify(patchAttempt.body)
-                });
-
-                if (adRes.ok) {
-                  adPatched = true;
-                  break;
-                }
-
-                const adData = await adRes.json().catch(() => ({}));
-                lastError = adData?.error?.message || `Ad start date update failed (${adRes.status}: ${adRes.statusText})`;
-              }
-
-              if (!adPatched) {
-                startDatePatchSuccess = false;
-                break;
-              }
-            }
-          }
-        } else if (changedStartDate && !creativePatchSuccess) {
-          startDatePatchSuccess = false;
+        } else if ((changedEndDate || changedStartDate) && !creativePatchSuccess) {
+          endDatePatchSuccess = !changedEndDate;
+          startDatePatchSuccess = !changedStartDate;
         }
 
         if (creativePatchSuccess && landingPatchSuccess && endDatePatchSuccess && startDatePatchSuccess) {
@@ -2576,7 +2502,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       await fetchCreativesInternal(accessToken, profileId, selectedAdvertiser.id);
     }
 
-    return { success: successCount, failed: failedCount, results };
+    return { success: successCount, failed: failedCount, results, notes: scheduleNotes };
   };
 
   const publishSelectedDrafts = async (placementIds: string[]) => {

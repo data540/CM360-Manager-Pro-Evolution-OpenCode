@@ -134,8 +134,9 @@ export const applyCreativeSchedule = (assignments: any[], schedule: CreativeSche
   return assignments.map((a) => {
     const window = schedule[String(a.creativeId)];
     if (!window || (!window.startTime && !window.endTime)) return a;
-    let start = window.startTime;
-    let end = window.endTime;
+    // Only the given date changes: the other one keeps the value the assignment already had.
+    let start = window.startTime ?? a.startTime;
+    let end = window.endTime ?? a.endTime;
     if (start && adStart && ms(start) < ms(adStart)) start = adStart;
     if (end && adEnd && ms(end) > ms(adEnd)) end = adEnd;
     // Compare against the Ad bounds too when only one date is given (e.g. a start after the Ad ends).
