@@ -120,7 +120,7 @@ export const associateWithCampaign = async (ctx: ExecutorContext, creativeId: st
   }
 };
 
-/** `landing`: click-through URL for every creative of the ad (tracking file); else the advertiser rule for Default Ads. */
+/** `landing`: click-through URL (tracking file) for `creativeIds` only; the rest keep theirs. Default Ads keep the advertiser rule. */
 /** Serving window of a creative inside an ad (RFC 3339), applied to its creative assignment. */
 export type CreativeSchedule = Record<string, { startTime?: string; endTime?: string }>;
 
@@ -170,7 +170,8 @@ export const updateAd = async (
     rotationType: ad.creativeRotation?.type,
     creativeIds,
     mode,
-    forcedLanding: landing || (ad.type === 'AD_SERVING_DEFAULT_AD' ? getForcedDefaultAdLanding(ctx.advertiserName) : null),
+    forcedLanding: ad.type === 'AD_SERVING_DEFAULT_AD' ? getForcedDefaultAdLanding(ctx.advertiserName) : null,
+    newCreativesLanding: landing,
   });
   const scheduled = applyCreativeSchedule(assignments, schedule, ad.startTime, ad.endTime);
   const body = ad.creativeRotation

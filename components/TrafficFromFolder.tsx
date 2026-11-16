@@ -536,7 +536,6 @@ const FullExecutionPanel: React.FC<FullExecutionPanelProps> = ({ plan, campaignN
 const ROW_ACTION_LABEL: Record<RowAction, { label: string; tone: string }> = {
   update: { label: 'Actualizar', tone: 'text-sky-300' },
   create: { label: 'Crear', tone: 'text-emerald-300' },
-  landing: { label: 'Solo landing', tone: 'text-fuchsia-300' },
   none: { label: 'Sin Default', tone: 'text-amber-400' },
   off: { label: '—', tone: 'text-slate-600' },
 };
@@ -739,7 +738,7 @@ interface CompleteExecutionPanelProps {
 
 const CompleteExecutionPanel: React.FC<CompleteExecutionPanelProps> = ({ plan, campaignName, advertiserName, options, log, confirming, onAsk, onCancel, onConfirm }) => {
   const running = !!log && !log.finished;
-  const n = (isDefault: boolean, kind: 'create' | 'update' | 'landing') => plan.actions.filter((a) => a.isDefault === isDefault && a.kind === kind).length;
+  const n = (isDefault: boolean, kind: 'create' | 'update') => plan.actions.filter((a) => a.isDefault === isDefault && a.kind === kind).length;
   const withLanding = plan.actions.filter((a) => a.clickUrl).length;
 
   if (!log) {
@@ -759,14 +758,18 @@ const CompleteExecutionPanel: React.FC<CompleteExecutionPanelProps> = ({ plan, c
               {n(false, 'update') > 0 && (
                 <li>Actualizar <b>{n(false, 'update')}</b> Ads estándar: las creatividades {options.standardMode === 'replace' ? 'sustituyen a las actuales' : 'se añaden en rotación'}.</li>
               )}
-              {n(false, 'landing') > 0 && <li>Cambiar solo la landing de <b>{n(false, 'landing')}</b> Ads existentes.</li>}
               {plan.creatives.some((c) => c.startDate || c.endDate) && (
                 <li>
                   <b>{plan.creatives.filter((c) => c.startDate || c.endDate).length}</b> creatividades con fechas propias en sus Ads estándar
                   (los Default Ads no se programan).
                 </li>
               )}
-              {withLanding > 0 && <li>En <b>{withLanding}</b> Ads estándar, todas sus creatividades llevarán la <b>URL de clic del archivo de tracking</b>.</li>}
+              {withLanding > 0 && (
+                <li>
+                  En <b>{withLanding}</b> Ads estándar, las creatividades nuevas llevarán la <b>URL de clic del archivo de tracking</b>;
+                  las que ya estaban en rotación conservan su landing.
+                </li>
+              )}
               {n(true, 'create') > 0 && <li>Crear <b>{n(true, 'create')}</b> Default Ads donde faltan.</li>}
               {n(true, 'update') > 0 && (
                 <li>Poner como Default en <b>{n(true, 'update')}</b> Default Ads: {options.defaultMode === 'replace' ? 'sustituyen a las actuales' : 'se añaden en rotación'}.</li>
@@ -817,7 +820,7 @@ const CompleteExecutionPanel: React.FC<CompleteExecutionPanelProps> = ({ plan, c
               <StepBadge status={step.status} />
               <div className="min-w-0">
                 <p className="text-slate-200 break-all">
-                  <span className="text-slate-500">{step.isDefault ? 'Default · ' : ''}{step.kind === 'create' ? 'Crear · ' : step.kind === 'landing' ? 'Landing · ' : 'Actualizar · '}</span>
+                  <span className="text-slate-500">{step.isDefault ? 'Default · ' : ''}{step.kind === 'create' ? 'Crear · ' : 'Actualizar · '}</span>
                   {step.adName}
                 </p>
                 <p className="text-slate-500">{step.adId ? `ID ${step.adId}` : ''}{step.message ? `${step.adId ? ' · ' : ''}${step.message}` : ''}</p>
@@ -1418,7 +1421,7 @@ const TrafficFromFolder: React.FC = () => {
                 )}
                 {trackingFiles.length === 0 && trackingErrors.length === 0 && (
                   <span className="text-slate-500">
-                    Opcional: déjalos en la carpeta de Drive (se leen solos) o súbelos aquí, varios a la vez (p. ej. uno por soporte). La «URL de clic (por redirección)» de cada soporte y país pasa a ser la landing de sus Ads.
+                    Opcional: déjalos en la carpeta de Drive (se leen solos) o súbelos aquí, varios a la vez (p. ej. uno por soporte). La «URL de clic (por redirección)» de cada soporte y país pasa a ser la landing de las creatividades nuevas; las que ya están en rotación no se tocan.
                   </span>
                 )}
               </div>

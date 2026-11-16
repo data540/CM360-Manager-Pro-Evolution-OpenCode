@@ -10,12 +10,17 @@ export interface AssignmentInput {
   mode: 'replace' | 'add';
   /** Fixed landing for Default Ads of some advertisers (Air Europa → aireuropa.com). */
   forcedLanding?: string | null;
+  /**
+   * Click-through URL for the creatives of this run only (`creativeIds`): the ones already in
+   * rotation keep their own landing (tracking file of "Completar Ads").
+   */
+  newCreativesLanding?: string | null;
 }
 
 // Output-only or per-entry fields that collide when an assignment is copied.
 const OUTPUT_ONLY = ['id', 'assignmentId', 'kind', 'startTime', 'endTime'];
 
-export const buildCreativeAssignments = ({ current, rotationType, creativeIds, mode, forcedLanding }: AssignmentInput): any[] => {
+export const buildCreativeAssignments = ({ current, rotationType, creativeIds, mode, forcedLanding, newCreativesLanding }: AssignmentInput): any[] => {
   const existing = current.filter((a) => a?.creativeId).map((a) => ({ ...a, active: a.active !== false }));
   const sequential = rotationType === 'CREATIVE_ROTATION_TYPE_SEQUENTIAL';
   // New entries copy the first current one: it carries the ad's click-through (landing) setup.
@@ -41,8 +46,11 @@ export const buildCreativeAssignments = ({ current, rotationType, creativeIds, m
       return entry;
     });
 
-  const next = [...kept, ...added];
-  return forcedLanding
-    ? next.map((a) => ({ ...a, clickThroughUrl: { defaultLandingPage: false, customClickThroughUrl: forcedLanding } }))
-    : next;
+  const custom = (url: string) => ({ defaultLandingPage: false, customClickThroughUrl: url });
+  const ofThisRun = new Set(creativeIds.map(String));
+  return [...kept, ...added].map((a) => {
+    if (newCreativesLanding && ofThisRun.has(String(a.creativeId))) return { ...a, clickThroughUrl: custom(newCreativesLanding) };
+    if (forcedLanding) return { ...a, clickThroughUrl: custom(forcedLanding) };
+    return a;
+  });
 };

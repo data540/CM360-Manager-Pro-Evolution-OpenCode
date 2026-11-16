@@ -68,7 +68,7 @@ test('placements belong to the support by a name token or by their CM360 site', 
   assert.equal(findTrackingRule(rules, 'PE', { name: 'x_alkimiads_300x250', size: '300x250' }), undefined);
 });
 
-test('complete plan: Ads of the support get the tracking URL; untouched Ads only change their landing', () => {
+test('complete plan: Ads of the support get the tracking URL; Ads without new creatives are not touched', () => {
   const rules = parseTrackingRows(readCsvRows(CSV), CODES).rules;
   const placement = (id: string, name: string) => ({ id, name, siteId: 's1', size: '300x250', compatibility: 'DISPLAY', active: true });
   const P_ALK = placement('p1', 'ae-co_kpi360_bf_2026_dis_prs_alkimiads_desktop_gen_300x250_1');
@@ -90,7 +90,7 @@ test('complete plan: Ads of the support get the tracking URL; untouched Ads only
   const std = (placementId: string) => plan.actions.find((a) => !a.isDefault && a.placementIds.includes(placementId));
   assert.equal(std('p1')?.clickUrl, CLICK_CO);
   assert.equal(std('p2')?.clickUrl, undefined);
-  assert.deepEqual([std('p3')?.kind, std('p3')?.clickUrl, std('p3')?.fileIds.length], ['landing', CLICK_CO, 0]);
+  assert.equal(std('p3'), undefined, 'no new creative for p3 → its old creatives keep their landing');
   assert.ok(plan.actions.filter((a) => a.isDefault).every((a) => !a.clickUrl), 'Default Ads keep their own landing rule');
 });
 

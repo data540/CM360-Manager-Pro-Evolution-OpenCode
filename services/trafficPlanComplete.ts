@@ -48,8 +48,7 @@ export interface CompleteCreative {
 
 export interface CompleteAdAction {
   key: string;
-  /** `landing`: only the click-through URL of an existing Ad changes (no new creatives). */
-  kind: 'update' | 'create' | 'landing';
+  kind: 'update' | 'create';
   isDefault: boolean;
   /** Existing ad (update) — for a create it is only known after execution. */
   adId?: string;
@@ -59,11 +58,11 @@ export interface CompleteAdAction {
   placementIds: string[];
   fileIds: string[];
   mode: 'replace' | 'add';
-  /** Click-through URL from the tracking file for every creative of this (standard) Ad. */
+  /** Click-through URL from the tracking file for the creatives of this run (not the ones already in rotation). */
   clickUrl?: string;
 }
 
-export type RowAction = 'update' | 'create' | 'landing' | 'none' | 'off';
+export type RowAction = 'update' | 'create' | 'none' | 'off';
 
 export interface CompleteRow {
   placement: PlanPlacement;
@@ -237,10 +236,9 @@ export const buildCompletePlan = (input: CompletePlanInput): CompletePlan => {
   const uncovered: PlanPlacement[] = [];
   const familiesInFolder = new Set(creatives.map((c) => (c.kind === 'video' ? 'video' : 'display')));
 
-  const addUpdate = (ad: PlanAd, placementId: string, fileIds: string[], isDefault: boolean, clickUrl?: string, kind: 'update' | 'landing' = 'update') => {
+  const addUpdate = (ad: PlanAd, placementId: string, fileIds: string[], isDefault: boolean, clickUrl?: string) => {
     const existing = actionsByAd.get(ad.id);
     if (existing) {
-      if (kind === 'update') existing.kind = 'update';
       if (clickUrl && existing.clickUrl && existing.clickUrl !== clickUrl) {
         issues.push({
           severity: 'warning',
@@ -256,7 +254,7 @@ export const buildCompletePlan = (input: CompletePlanInput): CompletePlan => {
     }
     actionsByAd.set(ad.id, {
       key: `ad:${ad.id}`,
-      kind,
+      kind: 'update',
       isDefault,
       adId: ad.id,
       adName: ad.name,
@@ -271,20 +269,7 @@ export const buildCompletePlan = (input: CompletePlanInput): CompletePlan => {
     const fileIds = creatives.filter((c) => c.placementIds.includes(placement.id)).map((c) => c.fileId);
     const landing = landingFor(placement);
     if (fileIds.length === 0) {
-      // No new creative, but the tracking file has its URL: only the landing of its Ads changes.
-      const activeStandard = ads.filter((ad) => ad.placementIds.includes(placement.id) && !ad.isDefault && ad.active);
-      if (landing && activeStandard.length > 0) {
-        activeStandard.forEach((ad) => addUpdate(ad, placement.id, [], false, landing.url, 'landing'));
-        rows.push({
-          placement,
-          siteName: siteName.get(placement.siteId),
-          fileIds: [],
-          standard: { action: 'landing', adNames: activeStandard.map((a) => a.name) },
-          default: { action: 'off', adNames: [] },
-          landing,
-        });
-        return;
-      }
+      // No new creative here: the landing of the creatives already serving is never changed.
       if (familiesInFolder.has(placementFamily(placement) as 'video' | 'display')) uncovered.push(placement);
       return;
     }
@@ -361,7 +346,7 @@ export const buildCompletePlan = (input: CompletePlanInput): CompletePlan => {
       issues.push({
         severity: 'warning',
         code: 'unmatched_file',
-        message: `Tracking ${describeRule(rule)} (${rule.support}): sus placements no tienen creatividad nueva ni Ad activo (o no están en los sites elegidos), no se cambia su landing.`,
+        message: `Tracking ${describeRule(rule)} (${rule.support}): sus placements no reciben creatividades nuevas en esta tirada (o no están en los sites elegidos). La landing de las creatividades que ya tienen no se cambia.`,
       });
       return;
     }
@@ -378,8 +363,7 @@ export const buildCompletePlan = (input: CompletePlanInput): CompletePlan => {
   // Standard first, then Default Ads: updates before creations within each group.
   const updates = [...actionsByAd.values()];
   const actions = [
-    ...updates.filter((a) => !a.isDefault && a.kind === 'update'),
-    ...updates.filter((a) => a.kind === 'landing'),
+    ...updates.filter((a) => !a.isDefault),
     ...creates.filter((a) => !a.isDefault),
     ...updates.filter((a) => a.isDefault),
     ...creates.filter((a) => a.isDefault),

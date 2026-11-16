@@ -30,3 +30,12 @@ test('an empty ad uses the campaign default landing; Default Ads get the forced 
   const forced = buildCreativeAssignments({ current, creativeIds: ['20'], mode: 'add', forcedLanding: 'https://www.aireuropa.com/' });
   assert.ok(forced.every((a) => a.clickThroughUrl.customClickThroughUrl === 'https://www.aireuropa.com/'));
 });
+
+test('tracking landing: only the creatives of this run get it, the ones already in rotation keep theirs', () => {
+  const tracking = 'https://fxj6.aireuropa.com/dynclick/aireuropa/?ead-publisher=Alkimiads';
+  const next = buildCreativeAssignments({ current, creativeIds: ['20'], mode: 'add', newCreativesLanding: tracking });
+  assert.deepEqual(next.map((a) => [a.creativeId, a.clickThroughUrl.customClickThroughUrl]), [['10', landing.customClickThroughUrl], ['11', landing.customClickThroughUrl], ['20', tracking]]);
+  // A creative of this run that was already in rotation (re-run) does get the tracking URL.
+  const rerun = buildCreativeAssignments({ current, creativeIds: ['11'], mode: 'add', newCreativesLanding: tracking });
+  assert.deepEqual(rerun.map((a) => a.clickThroughUrl.customClickThroughUrl), [landing.customClickThroughUrl, tracking]);
+});

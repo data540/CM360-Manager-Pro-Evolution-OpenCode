@@ -25,7 +25,7 @@ export interface CompleteExecutorContext extends ExecutorContext {
 
 export interface CompleteAdStep {
   key: string;
-  kind: 'update' | 'create' | 'landing';
+  kind: 'update' | 'create';
   isDefault: boolean;
   adName: string;
   status: StepStatus;
@@ -153,16 +153,6 @@ export const executeCompletePlan = async (
 
   // Phase 2: update existing Ads, create the missing ones.
   for (const [i, action] of plan.actions.entries()) {
-    if (action.kind === 'landing') {
-      setAd(i, { status: 'running' });
-      try {
-        await updateAd(ctx, action.adId!, [], 'add', action.clickUrl);
-        setAd(i, { status: 'done', message: 'Landing actualizada con la URL de tracking.' });
-      } catch (e: any) {
-        setAd(i, { status: 'error', message: e?.message || 'Error desconocido' });
-      }
-      continue;
-    }
     const creativeIds = action.fileIds.map((id) => creativeIdByFile.get(id)).filter((id): id is string => !!id);
     if (creativeIds.length === 0) {
       setAd(i, { status: 'skipped', message: 'Ninguna de sus creatividades se pudo subir.' });
