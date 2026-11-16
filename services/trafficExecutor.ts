@@ -44,13 +44,13 @@ export interface ExecutionLog {
 // Bodies above this cannot go through the Vercel rewrite; direct calls have no such limit.
 const PROXY_MAX_BYTES = 4 * 1024 * 1024;
 
-const apiError = async (res: Response, fallback: string) => {
+export const apiError = async (res: Response, fallback: string) => {
   const data = await res.json().catch(() => ({}));
   const detail = data?.error?.errors?.map((e: any) => e?.message).filter(Boolean).join(' | ');
   return detail || data?.error?.message || `${fallback} (HTTP ${res.status})`;
 };
 
-const cm = (ctx: ExecutorContext, path: string, init: RequestInit = {}) =>
+export const cm = (ctx: ExecutorContext, path: string, init: RequestInit = {}) =>
   fetch(`/api/cm360/userprofiles/${ctx.profileId}/${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${ctx.accessToken}`, ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...init.headers },
@@ -80,7 +80,7 @@ const uploadAsset = async (ctx: ExecutorContext, blob: Blob, fileName: string, a
 };
 
 /** A creative of this advertiser with exactly this name, so a re-run doesn't duplicate it. */
-const findCreativeByName = async (ctx: ExecutorContext, name: string): Promise<string | undefined> => {
+export const findCreativeByName = async (ctx: ExecutorContext, name: string): Promise<string | undefined> => {
   const params = new URLSearchParams({ advertiserId: ctx.advertiserId, searchString: name, maxResults: '50' });
   const res = await cm(ctx, `creatives?${params.toString()}`);
   if (!res.ok) return undefined;
@@ -88,7 +88,7 @@ const findCreativeByName = async (ctx: ExecutorContext, name: string): Promise<s
   return (data.creatives || []).find((c: any) => c.name === name && !c.archived)?.id?.toString();
 };
 
-const createCreative = async (ctx: ExecutorContext, blob: Blob, fileName: string, kind: string, size: string, name: string) => {
+export const createCreative = async (ctx: ExecutorContext, blob: Blob, fileName: string, kind: string, size: string, name: string) => {
   const [width, height] = kind === 'video' ? [0, 0] : size.split('x').map(Number);
   const assetType = kind === 'video' ? 'VIDEO' : kind === 'html5' ? 'HTML' : 'HTML_IMAGE';
   const asset = await uploadAsset(ctx, blob, fileName, assetType);
@@ -109,7 +109,7 @@ const createCreative = async (ctx: ExecutorContext, blob: Blob, fileName: string
   return String((await res.json()).id);
 };
 
-const associateWithCampaign = async (ctx: ExecutorContext, creativeId: string) => {
+export const associateWithCampaign = async (ctx: ExecutorContext, creativeId: string) => {
   const res = await cm(ctx, `campaigns/${ctx.campaignId}/campaignCreativeAssociations`, {
     method: 'POST',
     body: JSON.stringify({ creativeId }),
@@ -120,7 +120,45 @@ const associateWithCampaign = async (ctx: ExecutorContext, creativeId: string) =
   }
 };
 
-const updateAd = async (ctx: ExecutorContext, adId: string, creativeIds: string[], mode: 'replace' | 'add') => {
+/** `landing`: click-through URL for every creative of the ad (tracking file); else the advertiser rule for Default Ads. */
+/** Serving window of a creative inside an ad (RFC 3339), applied to its creative assignment. */
+export type CreativeSchedule = Record<string, { startTime?: string; endTime?: string }>;
+
+/**
+ * Puts each scheduled creative's start/end on its assignment, clamped to the ad's own window
+ * (CM360 rejects assignment dates outside the ad). Throws if nothing of the window is left.
+ */
+export const applyCreativeSchedule = (assignments: any[], schedule: CreativeSchedule | undefined, adStart?: string, adEnd?: string) => {
+  if (!schedule) return assignments;
+  const ms = (v?: string) => (v ? Date.parse(v) : NaN);
+  return assignments.map((a) => {
+    const window = schedule[String(a.creativeId)];
+    if (!window || (!window.startTime && !window.endTime)) return a;
+    let start = window.startTime;
+    let end = window.endTime;
+    if (start && adStart && ms(start) < ms(adStart)) start = adStart;
+    if (end && adEnd && ms(end) > ms(adEnd)) end = adEnd;
+    // Compare against the Ad bounds too when only one date is given (e.g. a start after the Ad ends).
+    const effectiveStart = start || adStart;
+    const effectiveEnd = end || adEnd;
+    if (effectiveStart && effectiveEnd && ms(effectiveStart) >= ms(effectiveEnd)) {
+      throw new Error(`Las fechas de la creatividad ${a.creativeId} no caben en las del Ad (${adStart || '…'} → ${adEnd || '…'}).`);
+    }
+    const next = { ...a };
+    if (start) next.startTime = start; else delete next.startTime;
+    if (end) next.endTime = end; else delete next.endTime;
+    return next;
+  });
+};
+
+export const updateAd = async (
+  ctx: ExecutorContext,
+  adId: string,
+  creativeIds: string[],
+  mode: 'replace' | 'add',
+  landing?: string,
+  schedule?: CreativeSchedule,
+) => {
   const res = await cm(ctx, `ads/${adId}`);
   if (!res.ok) throw new Error(await apiError(res, 'No se pudo leer el anuncio'));
   const ad = await res.json();
@@ -132,11 +170,12 @@ const updateAd = async (ctx: ExecutorContext, adId: string, creativeIds: string[
     rotationType: ad.creativeRotation?.type,
     creativeIds,
     mode,
-    forcedLanding: ad.type === 'AD_SERVING_DEFAULT_AD' ? getForcedDefaultAdLanding(ctx.advertiserName) : null,
+    forcedLanding: landing || (ad.type === 'AD_SERVING_DEFAULT_AD' ? getForcedDefaultAdLanding(ctx.advertiserName) : null),
   });
+  const scheduled = applyCreativeSchedule(assignments, schedule, ad.startTime, ad.endTime);
   const body = ad.creativeRotation
-    ? { id: adId, creativeRotation: { ...ad.creativeRotation, creativeAssignments: assignments } }
-    : { id: adId, creativeAssignments: assignments };
+    ? { id: adId, creativeRotation: { ...ad.creativeRotation, creativeAssignments: scheduled } }
+    : { id: adId, creativeAssignments: scheduled };
   const patch = await cm(ctx, `ads?id=${encodeURIComponent(adId)}`, { method: 'PATCH', body: JSON.stringify(body) });
   if (!patch.ok) throw new Error(await apiError(patch, 'Error al actualizar el anuncio'));
 

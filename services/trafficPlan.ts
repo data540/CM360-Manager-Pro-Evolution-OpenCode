@@ -62,7 +62,9 @@ export type PlanIssueCode =
   | 'duplicate_name'
   | 'placement_without_creative'
   | 'placement_without_ad'
-  | 'mixed_size_ad';
+  | 'mixed_size_ad'
+  | 'tracking_support_mismatch'
+  | 'creative_dates';
 
 export interface PlanIssue {
   severity: 'error' | 'warning';
@@ -102,8 +104,8 @@ const DISPLAY_COMPATIBILITIES = ['DISPLAY', 'DISPLAY_INTERSTITIAL', 'APP', 'APP_
 const VIDEO_COMPATIBILITIES = ['IN_STREAM_VIDEO'];
 const DEVICE_TOKENS = ['desktop', 'mobile', 'tablet', 'ctv'];
 
-const familyOf = (kind: CreativeKind) => (kind === 'video' ? 'video' : 'display');
-const placementFamily = (p: PlanPlacement) =>
+export const familyOf = (kind: CreativeKind) => (kind === 'video' ? 'video' : 'display');
+export const placementFamily = (p: PlanPlacement) =>
   VIDEO_COMPATIBILITIES.includes(p.compatibility) ? 'video'
     : DISPLAY_COMPATIBILITIES.includes(p.compatibility) ? 'display'
       : 'other';
@@ -121,7 +123,7 @@ export const formatDateToken = (date: Date) =>
 export const buildCreativeName = (campaignName: string, size: string, date: Date) =>
   `${campaignName.trim()}_${size}_${formatDateToken(date)}`;
 
-const matchesFile = (file: DetectedFile, placement: PlanPlacement) => {
+export const matchesFile = (file: DetectedFile, placement: PlanPlacement) => {
   if (!placement.active || placementFamily(placement) !== familyOf(file.kind)) return false;
   // Display creatives must match the placement size exactly; video placements carry no
   // meaningful size in CM360, so any active video placement of the campaign is a candidate.

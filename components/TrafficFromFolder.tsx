@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronDown, FileText, FolderOpen, Layers, Loader2, Plus, Rocket, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, FileSpreadsheet, FileText, FolderOpen, Layers, Link2, ListPlus, Loader2, Plus, Rocket, X, XCircle } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getGoogleClientId } from '../constants';
 import type { DetectedFile } from '../services/creativeDetection';
@@ -9,6 +9,11 @@ import { buildTrafficPlan, PlanAd, PlanPlacement, TrafficPlan } from '../service
 import { executePlan, ExecutionLog, StepStatus } from '../services/trafficExecutor';
 import { buildFullTrafficPlan, FullPlannedCreative, FullTrafficPlan, parsePlacementNames } from '../services/trafficPlanFull';
 import { executeFullPlan, FullExecutionLog, initialFullLog } from '../services/trafficExecutorFull';
+import { buildCompletePlan, buildPrefixedCreativeName, CompleteOptions, CompletePlan, CreativeDates, RowAction } from '../services/trafficPlanComplete';
+import { formatDateToken } from '../services/trafficPlan';
+import { CompleteExecutionLog, executeCompletePlan, initialCompleteLog } from '../services/trafficExecutorComplete';
+import { readTrackingFile, TrackingSheet } from '../services/trackingSheet';
+import { MARKETS } from '../services/markets';
 
 const LAST_LINK_KEY = 'traffic_folder_last_link';
 
@@ -29,7 +34,7 @@ const TRAFFICKABLE_AD_TYPES = ['AD_SERVING_STANDARD_AD', 'AD_SERVING_DEFAULT_AD'
 
 interface CmSiteRef { id: string; name: string }
 
-interface CampaignOption { id: string; name: string; endDate?: string }
+interface CampaignOption { id: string; name: string; startDate?: string; endDate?: string }
 
 interface CampaignData {
   placements: PlanPlacement[];
@@ -526,6 +531,305 @@ const FullExecutionPanel: React.FC<FullExecutionPanelProps> = ({ plan, campaignN
   );
 };
 
+// ─── Mode C: complete Ads / Default Ads ────────────────────────────────────────
+
+const ROW_ACTION_LABEL: Record<RowAction, { label: string; tone: string }> = {
+  update: { label: 'Actualizar', tone: 'text-sky-300' },
+  create: { label: 'Crear', tone: 'text-emerald-300' },
+  landing: { label: 'Solo landing', tone: 'text-fuchsia-300' },
+  none: { label: 'Sin Default', tone: 'text-amber-400' },
+  off: { label: '—', tone: 'text-slate-600' },
+};
+
+const RowActionCell: React.FC<{ action: RowAction; adNames: string[] }> = ({ action, adNames }) => (
+  <td className="px-3 py-2 text-xs" title={adNames.join('\n')}>
+    <span className={`font-semibold ${ROW_ACTION_LABEL[action].tone}`}>{ROW_ACTION_LABEL[action].label}</span>
+    {adNames.length > 0 && <span className="block text-slate-500 break-all">{adNames.length === 1 ? adNames[0] : `${adNames.length} Ads`}</span>}
+  </td>
+);
+
+interface CompletePlanViewProps {
+  plan: CompletePlan;
+  files: DetectedFile[];
+  campaign?: CampaignOption;
+  dates: Record<string, CreativeDates>;
+  onDates?: (next: Record<string, CreativeDates>) => void;
+}
+
+const CompletePlanView: React.FC<CompletePlanViewProps> = ({ plan, files, campaign, dates, onDates }) => {
+  const [showIssues, setShowIssues] = useState(false);
+  const [bulk, setBulk] = useState<CreativeDates>({});
+  const setDate = (fileId: string, field: keyof CreativeDates, value: string) =>
+    onDates?.({ ...dates, [fileId]: { ...dates[fileId], [field]: value || undefined } });
+  const applyBulk = () =>
+    onDates?.(Object.fromEntries(plan.creatives.map((c) => [c.fileId, { ...dates[c.fileId], ...(bulk.start ? { start: bulk.start } : {}), ...(bulk.end ? { end: bulk.end } : {}) }])));
+  const dateInput = 'bg-slate-950 border border-slate-700 rounded-md py-1 px-1.5 text-xs text-slate-200 focus:outline-none focus:border-teal-500 disabled:opacity-50 [color-scheme:dark]';
+  const creativeByFile = new Map<string, CompletePlan['creatives'][number]>(plan.creatives.map((c) => [c.fileId, c]));
+  const count = (pred: (a: CompletePlan['actions'][number]) => boolean) => plan.actions.filter(pred).length;
+  const errors = plan.issues.filter((i) => i.severity === 'error');
+  const warnings = plan.issues.filter((i) => i.severity === 'warning');
+  const fileName = new Map(files.map((f) => [f.id, f.fileName]));
+  const hasLandings = plan.rows.some((r) => r.landing);
+
+  return (
+    <div className="border-t border-slate-800 p-4 space-y-4">
+      <div className={`grid grid-cols-2 gap-3 ${hasLandings ? 'lg:grid-cols-6' : 'lg:grid-cols-5'}`}>
+        {[
+          { label: 'Creatividades a subir', value: plan.creatives.length, tone: 'text-slate-100' },
+          { label: 'Ads a crear', value: count((a) => a.kind === 'create' && !a.isDefault), tone: 'text-emerald-300' },
+          { label: 'Ads a actualizar', value: count((a) => a.kind === 'update' && !a.isDefault), tone: 'text-sky-300' },
+          { label: 'Default Ads crear / actualizar', value: `${count((a) => a.kind === 'create' && a.isDefault)} / ${count((a) => a.kind === 'update' && a.isDefault)}`, tone: 'text-slate-100' },
+          { label: 'Placements sin creatividad', value: plan.uncovered.length, tone: plan.uncovered.length ? 'text-amber-400' : 'text-emerald-400' },
+          ...(hasLandings ? [{ label: 'Ads con landing de tracking', value: count((a) => !!a.clickUrl), tone: 'text-fuchsia-300' }] : []),
+        ].map((card) => (
+          <div key={card.label} className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+            <p className="text-[10px] uppercase font-bold tracking-widest text-slate-500">{card.label}</p>
+            <p className={`text-xl font-bold mt-1 ${card.tone}`}>{card.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {errors.length > 0 && (
+        <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 space-y-1">
+          {errors.map((issue, i) => (
+            <p key={i} className="flex items-start gap-2 text-sm text-rose-300"><IssueIcon severity="error" /> {issue.message}</p>
+          ))}
+        </div>
+      )}
+
+      {plan.creatives.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+            <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500">Fechas de las creatividades</span>
+            <span className="text-slate-500">
+              Vacío = mientras dure el Ad{campaign?.startDate || campaign?.endDate ? ` (campaña ${campaign?.startDate || '…'} → ${campaign?.endDate || '…'})` : ''}.
+            </span>
+            <span className="ml-auto flex items-center gap-1.5">
+              Todas:
+              <input type="date" disabled={!onDates} value={bulk.start || ''} min={campaign?.startDate} max={campaign?.endDate}
+                onChange={(e) => setBulk((b) => ({ ...b, start: e.target.value || undefined }))} className={dateInput} />
+              →
+              <input type="date" disabled={!onDates} value={bulk.end || ''} min={campaign?.startDate} max={campaign?.endDate}
+                onChange={(e) => setBulk((b) => ({ ...b, end: e.target.value || undefined }))} className={dateInput} />
+              <button onClick={applyBulk} disabled={!onDates || (!bulk.start && !bulk.end)}
+                className="rounded-md border border-slate-700 px-2 py-1 font-semibold text-slate-300 hover:text-white disabled:opacity-40">Aplicar</button>
+              <button onClick={() => onDates?.({})} disabled={!onDates || Object.keys(dates).length === 0}
+                className="rounded-md px-2 py-1 text-slate-500 hover:text-slate-200 disabled:opacity-40">Quitar fechas</button>
+            </span>
+          </div>
+          <table className="w-full text-sm rounded-lg border border-slate-800 overflow-hidden">
+            <thead className="bg-slate-900/60 text-[10px] uppercase tracking-widest text-slate-500">
+              <tr>
+                <th className="text-left px-3 py-2">Archivo</th>
+                <th className="text-left px-3 py-2">Nombre de la creatividad</th>
+                <th className="text-left px-3 py-2">Tamaño</th>
+                <th className="text-left px-3 py-2">Placements</th>
+                <th className="text-left px-3 py-2">Inicio</th>
+                <th className="text-left px-3 py-2">Fin</th>
+              </tr>
+            </thead>
+            <tbody>
+              {plan.creatives.map((c) => {
+                const wrong = plan.issues.some((i) => i.code === 'creative_dates' && i.severity === 'error' && i.fileId === c.fileId);
+                return (
+                  <tr key={c.fileId} className={`border-t border-slate-800 ${wrong ? 'bg-rose-500/10' : ''}`}>
+                    <td className="px-3 py-2 font-mono text-slate-300">{c.fileName}</td>
+                    <td className="px-3 py-2 font-mono text-slate-100 break-all">{c.creativeName}</td>
+                    <td className="px-3 py-2 font-mono text-slate-400">{c.size}</td>
+                    <td className="px-3 py-2 text-slate-400">{c.placementIds.length}</td>
+                    <td className="px-3 py-1.5">
+                      <input type="date" disabled={!onDates} value={dates[c.fileId]?.start || ''} min={campaign?.startDate} max={campaign?.endDate}
+                        onChange={(e) => setDate(c.fileId, 'start', e.target.value)} className={dateInput} />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <input type="date" disabled={!onDates} value={dates[c.fileId]?.end || ''} min={dates[c.fileId]?.start || campaign?.startDate} max={campaign?.endDate}
+                        onChange={(e) => setDate(c.fileId, 'end', e.target.value)} className={dateInput} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {plan.rows.length > 0 && (
+        <table className="w-full text-sm rounded-lg border border-slate-800 overflow-hidden">
+          <thead className="bg-slate-900/60 text-[10px] uppercase tracking-widest text-slate-500">
+            <tr>
+              <th className="text-left px-3 py-2">Placement</th>
+              <th className="text-left px-3 py-2">Site</th>
+              <th className="text-left px-3 py-2">Creatividades</th>
+              <th className="text-left px-3 py-2">Ad estándar</th>
+              <th className="text-left px-3 py-2">Default Ad</th>
+              {hasLandings && <th className="text-left px-3 py-2">Landing (tracking)</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {plan.rows.map((row) => (
+              <tr key={row.placement.id} className="border-t border-slate-800">
+                <td className="px-3 py-2 font-mono text-slate-200 break-all text-xs">{row.placement.name}</td>
+                <td className="px-3 py-2 text-xs text-slate-400">{row.siteName || row.placement.siteId}</td>
+                <td className="px-3 py-2 font-mono text-xs text-slate-400" title={row.fileIds.map((id) => fileName.get(id)).join('\n')}>
+                  {row.fileIds.length === 0 ? '—' : row.fileIds.length === 1 ? creativeByFile.get(row.fileIds[0])?.fileName : `${row.fileIds.length} archivos`}
+                </td>
+                <RowActionCell action={row.standard.action} adNames={row.standard.adNames} />
+                <RowActionCell action={row.default.action} adNames={row.default.adNames} />
+                {hasLandings && (
+                  <td className="px-3 py-2 text-xs max-w-[16rem]" title={row.landing?.url}>
+                    {row.landing ? (
+                      <>
+                        <span className="font-semibold text-fuchsia-300">{row.landing.support}</span>
+                        <span className="block text-slate-500 truncate">{row.landing.url}</span>
+                      </>
+                    ) : <span className="text-slate-600">—</span>}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {plan.extraFiles.length > 0 && (
+        <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-3 text-xs text-sky-200/70 space-y-0.5">
+          <p className="text-[10px] uppercase font-bold tracking-widest text-sky-300/80">Sin placement en los sites elegidos — no se suben</p>
+          {plan.extraFiles.map((f) => <p key={f.id} className="font-mono">{f.fileName}{f.size ? ` · ${f.size}` : ''}</p>)}
+        </div>
+      )}
+
+      {(warnings.length > 0 || plan.uncovered.length > 0) && (
+        <div className="rounded-lg border border-slate-800">
+          <button
+            onClick={() => setShowIssues((v) => !v)}
+            className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-amber-300 hover:bg-slate-900/60"
+          >
+            <ChevronDown className={`w-4 h-4 transition-transform ${showIssues ? 'rotate-180' : ''}`} />
+            {warnings.length + plan.uncovered.length} aviso{warnings.length + plan.uncovered.length === 1 ? '' : 's'}
+          </button>
+          {showIssues && (
+            <div className="border-t border-slate-800 p-3 space-y-1">
+              {warnings.map((issue, i) => (
+                <p key={i} className="flex items-start gap-2 text-xs text-slate-300"><IssueIcon severity="warning" /> {issue.message}</p>
+              ))}
+              {plan.uncovered.map((p) => (
+                <p key={p.id} className="flex items-start gap-2 text-xs text-slate-300">
+                  <IssueIcon severity="warning" /> Ninguna creatividad de la carpeta encaja con {p.name}{p.size ? ` (${p.size})` : ''}.
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface CompleteExecutionPanelProps {
+  plan: CompletePlan;
+  campaignName: string;
+  advertiserName: string;
+  options: Pick<CompleteOptions, 'standardMode' | 'defaultMode'>;
+  log?: CompleteExecutionLog;
+  confirming: boolean;
+  onAsk: () => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}
+
+const CompleteExecutionPanel: React.FC<CompleteExecutionPanelProps> = ({ plan, campaignName, advertiserName, options, log, confirming, onAsk, onCancel, onConfirm }) => {
+  const running = !!log && !log.finished;
+  const n = (isDefault: boolean, kind: 'create' | 'update' | 'landing') => plan.actions.filter((a) => a.isDefault === isDefault && a.kind === kind).length;
+  const withLanding = plan.actions.filter((a) => a.clickUrl).length;
+
+  if (!log) {
+    if (plan.blocked || plan.actions.length === 0) return null;
+    return (
+      <div className="border-t border-slate-800 p-4">
+        {!confirming ? (
+          <button onClick={onAsk} className="inline-flex items-center gap-2 rounded-lg bg-teal-600 hover:bg-teal-500 px-4 py-2 text-sm font-bold text-white">
+            <Rocket className="w-4 h-4" /> Completar en CM360…
+          </button>
+        ) : (
+          <div className="rounded-xl border border-teal-500/40 bg-teal-500/10 p-4 space-y-3">
+            <p className="text-sm font-bold text-slate-100">Vas a modificar CM360 ({advertiserName}) — campaña <span className="font-mono">{campaignName}</span>:</p>
+            <ul className="text-sm text-slate-300 list-disc pl-5 space-y-1">
+              {plan.creatives.length > 0 && <li>Subir <b>{plan.creatives.length}</b> creatividades y asociarlas a la campaña (las que ya existan con el mismo nombre se reutilizan).</li>}
+              {n(false, 'create') > 0 && <li>Crear <b>{n(false, 'create')}</b> Ads estándar (uno por placement, con el nombre del placement).</li>}
+              {n(false, 'update') > 0 && (
+                <li>Actualizar <b>{n(false, 'update')}</b> Ads estándar: las creatividades {options.standardMode === 'replace' ? 'sustituyen a las actuales' : 'se añaden en rotación'}.</li>
+              )}
+              {n(false, 'landing') > 0 && <li>Cambiar solo la landing de <b>{n(false, 'landing')}</b> Ads existentes.</li>}
+              {plan.creatives.some((c) => c.startDate || c.endDate) && (
+                <li>
+                  <b>{plan.creatives.filter((c) => c.startDate || c.endDate).length}</b> creatividades con fechas propias en sus Ads estándar
+                  (los Default Ads no se programan).
+                </li>
+              )}
+              {withLanding > 0 && <li>En <b>{withLanding}</b> Ads estándar, todas sus creatividades llevarán la <b>URL de clic del archivo de tracking</b>.</li>}
+              {n(true, 'create') > 0 && <li>Crear <b>{n(true, 'create')}</b> Default Ads donde faltan.</li>}
+              {n(true, 'update') > 0 && (
+                <li>Poner como Default en <b>{n(true, 'update')}</b> Default Ads: {options.defaultMode === 'replace' ? 'sustituyen a las actuales' : 'se añaden en rotación'}.</li>
+              )}
+            </ul>
+            <div className="flex gap-2">
+              <button onClick={onConfirm} className="rounded-lg bg-teal-600 hover:bg-teal-500 px-4 py-2 text-sm font-bold text-white">Confirmar y ejecutar</button>
+              <button onClick={onCancel} className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-300 hover:text-white">Cancelar</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const count = (steps: { status: StepStatus }[], ...statuses: StepStatus[]) => steps.filter((s) => statuses.includes(s.status)).length;
+  const cErrors = count(log.creatives, 'error');
+  const aErrors = count(log.ads, 'error');
+  return (
+    <div className="border-t border-slate-800 p-4 space-y-3">
+      <p className="text-sm font-bold text-slate-100 flex flex-wrap items-center gap-2">
+        {running ? <Loader2 className="w-4 h-4 animate-spin text-blue-300" /> : <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+        {running ? 'Completando… no cierres esta pestaña.' : 'Terminado.'}
+        <span className="font-normal text-xs text-slate-400">
+          Creatividades: {count(log.creatives, 'done', 'reused')}/{log.creatives.length} ok
+          {cErrors > 0 && <span className="text-rose-400"> · {cErrors} con error</span>}
+          {' · '}Ads: {count(log.ads, 'done')}/{log.ads.length} ok
+          {aErrors > 0 && <span className="text-rose-400"> · {aErrors} con error</span>}
+        </span>
+      </p>
+      <div className="grid lg:grid-cols-2 gap-3">
+        <div className="rounded-lg border border-slate-800 max-h-80 overflow-auto">
+          <p className="px-3 py-1.5 text-[10px] uppercase tracking-widest text-slate-500 font-bold border-b border-slate-800">Creatividades</p>
+          {log.creatives.map((step) => (
+            <div key={step.fileId} className="flex items-start gap-3 px-3 py-2 border-b border-slate-800 last:border-b-0 text-xs">
+              <StepBadge status={step.status} />
+              <div className="min-w-0">
+                <p className="font-mono text-slate-200 break-all">{step.creativeName}</p>
+                <p className="text-slate-500">{step.creativeId ? `ID ${step.creativeId}` : step.fileName}{step.message ? ` · ${step.message}` : ''}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="rounded-lg border border-slate-800 max-h-80 overflow-auto">
+          <p className="px-3 py-1.5 text-[10px] uppercase tracking-widest text-slate-500 font-bold border-b border-slate-800">Ads y Default Ads</p>
+          {log.ads.map((step) => (
+            <div key={step.key} className="flex items-start gap-3 px-3 py-2 border-b border-slate-800 last:border-b-0 text-xs">
+              <StepBadge status={step.status} />
+              <div className="min-w-0">
+                <p className="text-slate-200 break-all">
+                  <span className="text-slate-500">{step.isDefault ? 'Default · ' : ''}{step.kind === 'create' ? 'Crear · ' : step.kind === 'landing' ? 'Landing · ' : 'Actualizar · '}</span>
+                  {step.adName}
+                </p>
+                <p className="text-slate-500">{step.adId ? `ID ${step.adId}` : ''}{step.message ? `${step.adId ? ' · ' : ''}${step.message}` : ''}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ─── Main component ────────────────────────────────────────────────────────────
 
 const TrafficFromFolder: React.FC = () => {
@@ -536,7 +840,7 @@ const TrafficFromFolder: React.FC = () => {
   const [groupStates, setGroupStates] = useState<Record<string, GroupState>>({});
 
   // Global options (Mode A)
-  const [trafficMode, setTrafficMode] = useState<'existing' | 'create'>('existing');
+  const [trafficMode, setTrafficMode] = useState<'existing' | 'create' | 'complete'>('existing');
   const [includeDefaultAds, setIncludeDefaultAds] = useState(true);
   const [mode, setMode] = useState<'replace' | 'add'>('replace');
 
@@ -545,6 +849,37 @@ const TrafficFromFolder: React.FC = () => {
   const [siteFilters, setSiteFilters] = useState<Record<string, Set<string>>>({});
   const [createDefaultAdsB, setCreateDefaultAdsB] = useState<Record<string, boolean>>({});
   const [defaultAdModesB, setDefaultAdModesB] = useState<Record<string, 'replace' | 'add'>>({});
+
+  // Mode C (complete Ads / Default Ads): global options as in Creatives → Batch Upload, sites and
+  // "juego" per country.
+  const [namingPrefix, setNamingPrefix] = useState('');
+  const [namingSuffix, setNamingSuffix] = useState('');
+  const [includeDateC, setIncludeDateC] = useState(true);
+  const [setAsDefaultC, setSetAsDefaultC] = useState(true);
+  const [createMissingDefaultC, setCreateMissingDefaultC] = useState(true);
+  const [defaultModeC, setDefaultModeC] = useState<'replace' | 'add'>('replace');
+  const [standardModeC, setStandardModeC] = useState<'replace' | 'add'>('add');
+  const [siteSelectionsC, setSiteSelectionsC] = useState<Record<string, Set<string>>>({});
+  const [defaultSetKeysC, setDefaultSetKeysC] = useState<Record<string, string>>({});
+  const [creativeDatesC, setCreativeDatesC] = useState<Record<string, Record<string, CreativeDates>>>({});
+  const [completeExecLogs, setCompleteExecLogs] = useState<Record<string, CompleteExecutionLog>>({});
+  const [completeConfirmKey, setCompleteConfirmKey] = useState<string | null>(null);
+  const [tracking, setTracking] = useState<{ fileName: string; sheet: TrackingSheet } | null>(null);
+  const [trackingError, setTrackingError] = useState<string | null>(null);
+  const [showTrackingSkipped, setShowTrackingSkipped] = useState(false);
+
+  const loadTrackingFile = async (file?: File) => {
+    if (!file) return;
+    setTrackingError(null);
+    try {
+      const sheet = await readTrackingFile(file, new Set(MARKETS.map((m) => m.code)));
+      if (sheet.rules.length === 0) throw new Error('No hay ninguna fila con soporte y URL de clic (por redirección).');
+      setTracking({ fileName: file.name, sheet });
+    } catch (e: any) {
+      setTracking(null);
+      setTrackingError(`No se pudo leer ${file.name}: ${e?.message || 'formato no reconocido'}`);
+    }
+  };
 
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -595,8 +930,13 @@ const TrafficFromFolder: React.FC = () => {
     setGroupStates({});
     setExecLogs({});
     setFullExecLogs({});
+    setCompleteExecLogs({});
+    setSiteSelectionsC({});
+    setDefaultSetKeysC({});
+    setCreativeDatesC({});
     setConfirmKey(null);
     setFullConfirmKey(null);
+    setCompleteConfirmKey(null);
     try {
       setProgress('Pidiendo acceso a Google Drive…');
       const token = await getDriveToken(getGoogleClientId());
@@ -615,7 +955,7 @@ const TrafficFromFolder: React.FC = () => {
           new URLSearchParams({ advertiserIds: advertiserId, archived: 'false', maxResults: '1000' }),
         );
         campaignLists[advertiserId] = campaigns
-          .map((c) => ({ id: String(c.id), name: String(c.name), endDate: c.endDate }))
+          .map((c) => ({ id: String(c.id), name: String(c.name), startDate: c.startDate, endDate: c.endDate }))
           .sort((a, b) => a.name.localeCompare(b.name));
       }
       setCampaignsByAdvertiser(campaignLists);
@@ -715,6 +1055,71 @@ const TrafficFromFolder: React.FC = () => {
     return out;
   }, [folder, groupStates, campaignsByAdvertiser, placementTexts, siteFilters, createDefaultAdsB, defaultAdModesB, trafficMode]);
 
+  // Mode C plans
+  const completePlans = useMemo(() => {
+    const out: Record<string, CompletePlan> = {};
+    if (!folder || trafficMode !== 'complete') return out;
+    const uploadDate = new Date();
+    folder.result.groups.forEach((group) => {
+      const key = groupKey(group);
+      const state = groupStates[key];
+      const advertiserId = group.market?.advertiserId;
+      const campaign = advertiserId && campaignsByAdvertiser[advertiserId]?.find((c) => c.id === state?.campaignId);
+      if (!state?.data || !campaign) return;
+      out[key] = buildCompletePlan({
+        campaign,
+        folderMarket: group.market,
+        files: group.files,
+        placements: state.data.placements,
+        ads: state.data.ads,
+        sites: state.data.sites,
+        options: {
+          prefix: namingPrefix,
+          suffix: namingSuffix,
+          includeDate: includeDateC,
+          uploadDate,
+          siteIds: siteSelectionsC[key] || new Set(),
+          setAsDefault: setAsDefaultC,
+          createMissingDefaultAds: setAsDefaultC && createMissingDefaultC,
+          defaultMode: defaultModeC,
+          standardMode: standardModeC,
+          defaultSetKey: defaultSetKeysC[key],
+          trackingRules: tracking?.sheet.rules,
+          creativeDates: creativeDatesC[key],
+        },
+      });
+    });
+    return out;
+  }, [folder, groupStates, campaignsByAdvertiser, trafficMode, namingPrefix, namingSuffix, includeDateC, siteSelectionsC,
+    setAsDefaultC, createMissingDefaultC, defaultModeC, standardModeC, defaultSetKeysC, tracking, creativeDatesC]);
+
+  const runCompleteExecution = async (group: CountryGroup, plan: CompletePlan) => {
+    const key = groupKey(group);
+    const campaignId = groupStates[key]?.campaignId;
+    const advertiserId = group.market?.advertiserId;
+    if (!group.market || !advertiserId || !campaignId || !accessToken || !profileId) return;
+    setCompleteConfirmKey(null);
+    setCompleteExecLogs((prev) => ({ ...prev, [key]: initialCompleteLog(plan) }));
+    try {
+      const driveToken = await getDriveToken(getGoogleClientId());
+      await executeCompletePlan(
+        {
+          accessToken,
+          profileId,
+          driveToken,
+          advertiserId,
+          advertiserName: group.market.advertiserName,
+          campaignId,
+          campaignEndDate: campaignsByAdvertiser[advertiserId]?.find((c) => c.id === campaignId)?.endDate,
+        },
+        plan,
+        (log) => setCompleteExecLogs((prev) => ({ ...prev, [key]: log })),
+      );
+    } catch (e: any) {
+      setGroupState(key, { error: e?.message || 'Error desconocido' });
+    }
+  };
+
   const runExecution = async (group: CountryGroup, plan: TrafficPlan) => {
     const key = groupKey(group);
     const campaignId = groupStates[key]?.campaignId;
@@ -767,7 +1172,14 @@ const TrafficFromFolder: React.FC = () => {
 
   const anyRunning =
     Object.values<ExecutionLog>(execLogs).some((log) => !log.finished) ||
-    Object.values<FullExecutionLog>(fullExecLogs).some((log) => !log.finished);
+    Object.values<FullExecutionLog>(fullExecLogs).some((log) => !log.finished) ||
+    Object.values<CompleteExecutionLog>(completeExecLogs).some((log) => !log.finished);
+  const switchMode = (next: 'existing' | 'create' | 'complete') => {
+    setTrafficMode(next);
+    setConfirmKey(null);
+    setFullConfirmKey(null);
+    setCompleteConfirmKey(null);
+  };
   const isRunning = progress !== null;
 
   return (
@@ -807,7 +1219,7 @@ const TrafficFromFolder: React.FC = () => {
             <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500 shrink-0 mr-1">Modo de tráfico</span>
             <div className="flex rounded-xl border border-slate-700 overflow-hidden">
               <button
-                onClick={() => { setTrafficMode('existing'); setConfirmKey(null); setFullConfirmKey(null); }}
+                onClick={() => switchMode('existing')}
                 disabled={anyRunning}
                 className={`flex items-center gap-2 px-5 py-2.5 text-sm font-semibold transition-all disabled:opacity-50 ${
                   trafficMode === 'existing'
@@ -820,7 +1232,7 @@ const TrafficFromFolder: React.FC = () => {
               </button>
               <div className="w-px bg-slate-700 shrink-0" />
               <button
-                onClick={() => { setTrafficMode('create'); setConfirmKey(null); setFullConfirmKey(null); }}
+                onClick={() => switchMode('create')}
                 disabled={anyRunning}
                 className={`flex items-center gap-2 px-5 py-2.5 text-sm font-semibold transition-all disabled:opacity-50 ${
                   trafficMode === 'create'
@@ -831,6 +1243,19 @@ const TrafficFromFolder: React.FC = () => {
                 <Plus className="w-4 h-4" />
                 Crear desde cero
               </button>
+              <div className="w-px bg-slate-700 shrink-0" />
+              <button
+                onClick={() => switchMode('complete')}
+                disabled={anyRunning}
+                className={`flex items-center gap-2 px-5 py-2.5 text-sm font-semibold transition-all disabled:opacity-50 ${
+                  trafficMode === 'complete'
+                    ? 'bg-teal-600 text-white shadow-inner'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'
+                }`}
+              >
+                <ListPlus className="w-4 h-4" />
+                Completar Ads y Default Ads
+              </button>
             </div>
             {trafficMode === 'existing' && (
               <span className="text-xs text-slate-500 hidden lg:block">Asigna creatividades de Drive a placements y anuncios existentes en la campaña.</span>
@@ -838,7 +1263,126 @@ const TrafficFromFolder: React.FC = () => {
             {trafficMode === 'create' && (
               <span className="text-xs text-slate-500 hidden lg:block">Crea placements nuevos, sube creatividades y genera Default Ads desde cero.</span>
             )}
+            {trafficMode === 'complete' && (
+              <span className="text-xs text-slate-500 hidden lg:block">Los placements ya existen: sube las creatividades y crea los Ads y Default Ads que falten (como Batch Upload).</span>
+            )}
           </div>
+
+          {/* ── Mode C sub-options (same as Creatives → Batch Upload) ── */}
+          {trafficMode === 'complete' && (
+            <div className="px-4 pb-3 pt-2.5 border-t border-slate-800/60 space-y-2.5 text-xs text-slate-400">
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Prefix</label>
+                  <input
+                    value={namingPrefix}
+                    onChange={(e) => setNamingPrefix(e.target.value)}
+                    disabled={anyRunning}
+                    placeholder="Prefix text..."
+                    className="w-56 bg-slate-950 border border-slate-700 rounded-lg py-1.5 px-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-teal-500 placeholder:text-slate-600"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Suffix</label>
+                  <input
+                    value={namingSuffix}
+                    onChange={(e) => setNamingSuffix(e.target.value)}
+                    disabled={anyRunning}
+                    placeholder="Suffix text..."
+                    className="w-56 bg-slate-950 border border-slate-700 rounded-lg py-1.5 px-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-teal-500 placeholder:text-slate-600"
+                  />
+                </div>
+                <label className="flex items-center gap-1.5 cursor-pointer select-none pb-1.5">
+                  <input type="checkbox" checked={includeDateC} onChange={(e) => setIncludeDateC(e.target.checked)} />
+                  Añadir fecha
+                </label>
+                <p className="pb-1.5 text-slate-500">
+                  Ejemplo: <span className="font-mono text-slate-300">
+                    {buildPrefixedCreativeName('banner_300x250.zip', namingPrefix, namingSuffix, includeDateC ? formatDateToken(new Date()) : '')}
+                  </span>
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-5">
+                <span className="text-slate-500">Auto-match por tamaño</span>
+                <div className="flex items-center gap-3">
+                  <span>Ads estándar existentes:</span>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input type="radio" checked={standardModeC === 'add'} onChange={() => setStandardModeC('add')} /> se añaden en rotación
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input type="radio" checked={standardModeC === 'replace'} onChange={() => setStandardModeC('replace')} /> sustituyen a las actuales
+                  </label>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-5">
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input type="checkbox" checked={setAsDefaultC} onChange={(e) => setSetAsDefaultC(e.target.checked)} />
+                  Poner como Default
+                </label>
+                <label className={`flex items-center gap-1.5 cursor-pointer select-none ${setAsDefaultC ? '' : 'opacity-40'}`}>
+                  <input
+                    type="checkbox"
+                    disabled={!setAsDefaultC}
+                    checked={setAsDefaultC && createMissingDefaultC}
+                    onChange={(e) => setCreateMissingDefaultC(e.target.checked)}
+                  />
+                  Crear Default Ads donde falten
+                </label>
+                <div className={`flex items-center gap-3 ${setAsDefaultC ? '' : 'opacity-40'}`}>
+                  <span>Default Ads:</span>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input type="radio" disabled={!setAsDefaultC} checked={defaultModeC === 'replace'} onChange={() => setDefaultModeC('replace')} /> sustituyen a las actuales
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input type="radio" disabled={!setAsDefaultC} checked={defaultModeC === 'add'} onChange={() => setDefaultModeC('add')} /> se añaden en rotación
+                  </label>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <span className="flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-widest text-slate-500">
+                  <Link2 className="w-3.5 h-3.5" /> Landings
+                </span>
+                <label className={`inline-flex items-center gap-2 rounded-lg border border-fuchsia-500/40 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 px-3 py-1.5 text-xs font-semibold text-fuchsia-200 ${anyRunning ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}>
+                  <FileSpreadsheet className="w-4 h-4" />
+                  {tracking ? 'Cambiar archivo de tracking' : 'Subir archivo de tracking (.xlsx)'}
+                  <input
+                    type="file"
+                    accept=".xlsx,.csv"
+                    className="hidden"
+                    onChange={(e) => { loadTrackingFile(e.target.files?.[0]); e.target.value = ''; }}
+                  />
+                </label>
+                {tracking && (
+                  <>
+                    <span className="text-slate-300">
+                      <span className="font-mono">{tracking.fileName}</span>
+                      {tracking.sheet.sheetName && <span className="text-slate-500"> (hoja «{tracking.sheet.sheetName}»)</span>}
+                      {' · '}{tracking.sheet.rules.length} URL{tracking.sheet.rules.length === 1 ? '' : 's'}
+                      {' · '}soportes: {[...new Set(tracking.sheet.rules.map((r) => r.support))].join(', ')}
+                      {' · '}países: {[...new Set(tracking.sheet.rules.map((r) => r.country).filter(Boolean))].join(', ')}
+                    </span>
+                    {tracking.sheet.skipped.length > 0 && (
+                      <button onClick={() => setShowTrackingSkipped((v) => !v)} className="text-amber-300 hover:underline">
+                        {tracking.sheet.skipped.length} fila{tracking.sheet.skipped.length === 1 ? '' : 's'} con avisos
+                      </button>
+                    )}
+                    <button onClick={() => setTracking(null)} disabled={anyRunning} title="Quitar archivo" className="text-slate-500 hover:text-slate-200">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </>
+                )}
+                {!tracking && !trackingError && (
+                  <span className="text-slate-500">Opcional: la «URL de clic (por redirección)» de cada soporte y país pasa a ser la landing de sus Ads.</span>
+                )}
+                {trackingError && <span className="text-rose-300">{trackingError}</span>}
+              </div>
+              {tracking && showTrackingSkipped && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 space-y-0.5">
+                  {tracking.sheet.skipped.map((sk) => <p key={sk.row} className="text-amber-200/80">{sk.reason}</p>)}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── Mode A sub-options ── */}
           {trafficMode === 'existing' && (
@@ -894,6 +1438,7 @@ const TrafficFromFolder: React.FC = () => {
                 const state = groupStates[key];
                 const planA = plans[key];
                 const planB = fullPlans[key];
+                const planC = completePlans[key];
                 const campaignOptions = group.market ? campaignsByAdvertiser[group.market.advertiserId] || [] : [];
 
                 // Mode B local state helpers
@@ -908,7 +1453,7 @@ const TrafficFromFolder: React.FC = () => {
                   : [];
 
                 return (
-                  <section key={key} className={`rounded-xl border overflow-hidden ${(planA || planB) ? 'border-emerald-500/40' : 'border-slate-800'}`}>
+                  <section key={key} className={`rounded-xl border overflow-hidden ${(planA || planB || planC) ? 'border-emerald-500/40' : 'border-slate-800'}`}>
                     {/* Group header */}
                     <div className="flex flex-wrap items-center gap-3 px-4 py-3 bg-slate-900/60">
                       {group.market
@@ -924,7 +1469,7 @@ const TrafficFromFolder: React.FC = () => {
                           {state?.loading && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
                           <select
                             value={state?.campaignId || ''}
-                            disabled={!!(execLogs[key] || fullExecLogs[key])}
+                            disabled={!!(execLogs[key] || fullExecLogs[key] || completeExecLogs[key])}
                             onChange={(e) => chooseCampaign(group, e.target.value)}
                             className="w-80 max-w-full bg-slate-950 border border-slate-700 rounded-lg py-1.5 px-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
                           >
@@ -957,6 +1502,81 @@ const TrafficFromFolder: React.FC = () => {
                         )}
                       </>
                     )}
+
+                    {/* Mode C content */}
+                    {trafficMode === 'complete' && !state?.data && <FileTable files={group.files} />}
+                    {trafficMode === 'complete' && state?.data && (() => {
+                      const siteSelection = siteSelectionsC[key] || new Set<string>();
+                      const siteNames = new Map<string, string>(state.data.sites.map((s) => [s.id, s.name]));
+                      const campaignSiteIds = [...new Set<string>(state.data.placements.filter((p) => p.active).map((p) => p.siteId))]
+                        .sort((a, b) => (siteNames.get(a) || a).localeCompare(siteNames.get(b) || b));
+                      const toggleSite = (siteId: string, checked: boolean) =>
+                        setSiteSelectionsC((prev) => {
+                          const next = new Set(prev[key]?.size ? prev[key] : campaignSiteIds);
+                          if (checked) next.add(siteId); else next.delete(siteId);
+                          // All checked is stored as an empty set (= every site, also new ones).
+                          return { ...prev, [key]: campaignSiteIds.every((id) => next.has(id)) ? new Set() : next };
+                        });
+                      return (
+                        <>
+                          {!completeExecLogs[key] && (
+                            <div className="border-t border-slate-800 px-4 py-3 space-y-2.5">
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                                <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500">Sites</span>
+                                {campaignSiteIds.length === 0 && <span className="text-xs text-amber-400">La campaña no tiene placements activos.</span>}
+                                {campaignSiteIds.map((siteId) => (
+                                  <label key={siteId} className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={siteSelection.size === 0 || siteSelection.has(siteId)}
+                                      onChange={(e) => toggleSite(siteId, e.target.checked)}
+                                    />
+                                    {siteNames.get(siteId) || `Site ${siteId}`}
+                                  </label>
+                                ))}
+                              </div>
+                              {planC && setAsDefaultC && planC.needsSetChoice && planC.sets.length > 1 && (
+                                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                                  <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500">Juego para el Default</span>
+                                  <select
+                                    value={defaultSetKeysC[key] || planC.sets[0].key}
+                                    onChange={(e) => setDefaultSetKeysC((prev) => ({ ...prev, [key]: e.target.value }))}
+                                    className="max-w-full bg-slate-950 border border-slate-700 rounded-lg py-1 px-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-teal-500"
+                                  >
+                                    {planC.sets.map((s) => (
+                                      <option key={s.key} value={s.key}>{s.key} ({s.sizes.join(', ')})</option>
+                                    ))}
+                                  </select>
+                                  <span className="text-slate-500">Hay varios archivos del mismo tamaño: los Ads estándar los rotan todos, el Default lleva los de este juego.</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {planC && (
+                            <CompletePlanView
+                              plan={planC}
+                              files={group.files}
+                              campaign={campaignOptions.find((c) => c.id === state?.campaignId)}
+                              dates={creativeDatesC[key] || {}}
+                              onDates={completeExecLogs[key] ? undefined : (next) => setCreativeDatesC((prev) => ({ ...prev, [key]: next }))}
+                            />
+                          )}
+                          {group.market && (planC || completeExecLogs[key]) && (
+                            <CompleteExecutionPanel
+                              plan={planC || { creatives: [], actions: [], rows: [], extraFiles: [], uncovered: [], sets: [], needsSetChoice: false, issues: [], blocked: true }}
+                              campaignName={campaignOptions.find((c) => c.id === state?.campaignId)?.name || ''}
+                              advertiserName={group.market.advertiserName}
+                              options={{ standardMode: standardModeC, defaultMode: defaultModeC }}
+                              log={completeExecLogs[key]}
+                              confirming={completeConfirmKey === key}
+                              onAsk={() => setCompleteConfirmKey(key)}
+                              onCancel={() => setCompleteConfirmKey(null)}
+                              onConfirm={() => planC && runCompleteExecution(group, planC)}
+                            />
+                          )}
+                        </>
+                      );
+                    })()}
 
                     {/* Mode B content */}
                     {trafficMode === 'create' && state?.data && !fullExecLogs[key] && (
