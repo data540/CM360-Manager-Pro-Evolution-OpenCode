@@ -77,3 +77,29 @@ test('the campaign market picks its country folder, else the loose files at the 
   assert.equal(groupForMarket(result, marketOfCampaign('ae-ch_kpi360_ttf_dis'))?.folderName, 'Suiza');
   assert.equal(groupForMarket(result, marketOfCampaign('ae-es_kpi360_ttf_dis'))?.folderName, '');
 });
+
+test('a root folder named after another advertiser sends its country folders to that advertiser', async () => {
+  const { advertiserFromFolderName, assignFolderAdvertiser } = await import('./driveFolders');
+  const advertisers = [
+    { id: '72400055', name: 'Ocaso Seguros' },
+    { id: '72400011', name: 'Hoteles Brisamar' },
+    { id: '13731874', name: 'Air Europa ES' },
+  ];
+  assert.equal(advertiserFromFolderName('Ocaso Seguros · Hogar Primavera 2027', advertisers)?.id, '72400055');
+  assert.equal(advertiserFromFolderName('ocaso seguros - decesos', advertisers)?.id, '72400055');
+  assert.equal(advertiserFromFolderName('Air Europa ES Black Friday', advertisers), undefined, 'market advertisers keep the country rule');
+  assert.equal(advertiserFromFolderName('Banners Navidad 2026', advertisers), undefined);
+  assert.equal(advertiserFromFolderName('Ocasional banners', advertisers), undefined, 'whole words only');
+
+  const entry = (name: string, path: string[], mimeType = 'image/png') => ({ id: name, name, mimeType, path, bytes: 10 });
+  const grouped = groupDriveFiles('Ocaso Seguros · Hogar Primavera 2027', [
+    entry('España', [], 'application/vnd.google-apps.folder'),
+    entry('Ocaso_Hogar_300x250.png', ['España']),
+    entry('Ocaso_Hogar_728x90.png', ['España']),
+  ] as any);
+  assert.equal(grouped.groups[0].market?.code, 'ES');
+  const result = assignFolderAdvertiser(grouped, advertisers[0]);
+  assert.equal(result.groups.length, 1);
+  assert.deepEqual([result.groups[0].market?.code, result.groups[0].market?.advertiserId, result.groups[0].market?.advertiserName], ['ES', '72400055', 'Ocaso Seguros']);
+  assert.equal(result.groups[0].files.length, 2);
+});

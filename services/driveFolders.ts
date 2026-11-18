@@ -11,7 +11,7 @@
 // Zips unpacked on a Mac bring `__MACOSX/` copies and `._*` files: those are ignored.
 
 import { classifyFile, DetectedFile, deviceFromFileName, normalizeSize, sizeFromFileName } from './creativeDetection';
-import { detectMarketFromFolder, Market } from './markets';
+import { detectMarketFromFolder, Market, MARKETS, normalizeLabel } from './markets';
 
 export const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder';
 
@@ -134,3 +134,49 @@ export const groupDriveFiles = (rootName: string, entries: DriveEntry[]): DriveF
 export const groupForMarket = (result: DriveFolderResult, market: Market | undefined) =>
   (market && result.groups.find((g) => g.market?.code === market.code))
   || result.groups.find((g) => g.folderName === '');
+
+// ─── Folders of other advertisers ─────────────────────────────────────────────
+// Country folders map to the markets of the airline (España → its ES advertiser). A root folder
+// named after another CM360 advertiser ("Ocaso Seguros · Hogar Primavera 2027") sends all its
+// files to that advertiser instead; its country folders only tell the country.
+
+export interface FolderAdvertiser {
+  id: string;
+  name: string;
+}
+
+/** The advertiser named in the root folder, if any (market advertisers excluded). Longest name wins. */
+export const advertiserFromFolderName = (
+  rootName: string,
+  advertisers: FolderAdvertiser[],
+  excludeIds: Set<string> = new Set(MARKETS.map((m) => m.advertiserId)),
+): FolderAdvertiser | undefined => {
+  const root = ` ${normalizeLabel(rootName).replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ')} `;
+  const candidates = advertisers
+    .filter((a) => a.name && !excludeIds.has(String(a.id)))
+    .map((a) => ({ a, name: normalizeLabel(a.name).replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim() }))
+    .filter(({ name }) => name.length >= 3 && root.includes(` ${name} `))
+    .sort((x, y) => y.name.length - x.name.length);
+  return candidates[0]?.a;
+};
+
+/** Every group of the folder goes to `advertiser`; the country (if any) comes from its folder. */
+export const assignFolderAdvertiser = (result: DriveFolderResult, advertiser: FolderAdvertiser): DriveFolderResult => {
+  const merged = new Map<string, CountryGroup>();
+  result.groups.forEach((group) => {
+    const code = group.market?.code || '';
+    const key = code || `folder:${group.folderName}`;
+    const existing = merged.get(key);
+    if (existing) {
+      existing.files.push(...group.files);
+      return;
+    }
+    merged.set(key, {
+      ...group,
+      files: [...group.files],
+      market: { code, advertiserId: String(advertiser.id), advertiserName: advertiser.name, campaignPrefix: '', aliases: [] },
+    });
+  });
+  const groups = [...merged.values()];
+  return { ...result, groups, unknownFolders: [] };
+};

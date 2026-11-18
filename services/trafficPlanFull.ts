@@ -72,7 +72,8 @@ export const extractSiteToken = (name: string): string => {
 };
 
 export const extractSizeFromName = (name: string): string | undefined => {
-  const match = name.match(/\b(\d{2,4}x\d{2,4})\b/i);
+  // Not \b: in `…_gen_728x90` the `_` is a word character, so there is no word boundary.
+  const match = name.match(/(?<!\d)(\d{1,4}x\d{1,4})(?!\d)/i);
   return match ? match[1].toLowerCase() : undefined;
 };
 
@@ -81,7 +82,7 @@ interface CmSite {
   name: string;
 }
 
-const normSite = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+const normSite = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 export const matchSiteToken = (token: string, sites: CmSite[]): CmSite | undefined => {
   if (!token) return undefined;
@@ -102,8 +103,18 @@ export const parsePlacementNames = (text: string, sites: CmSite[]): ParsedPlacem
       const size = extractSizeFromName(name);
       if (!size) return [];
       const trimmed = name.replace(/_+$/, '');
-      const siteToken = extractSiteToken(trimmed);
-      const matched = matchSiteToken(siteToken, sites);
+      // The site is the word of the name that is a CM360 site (dv360, seedtag…); the concept
+      // words before it (black-friday, decesos…) must not be taken for it.
+      const words = trimmed.toLowerCase().split(/[_-]+/).filter(Boolean);
+      const bySite = words
+        .map((w) => ({
+          w,
+          site: sites.find((s) => normSite(s.name) === normSite(w))
+            || (w.length >= 4 ? sites.find((s) => normSite(s.name).startsWith(normSite(w))) : undefined),
+        }))
+        .find((x) => x.site);
+      const siteToken = bySite?.w || extractSiteToken(trimmed);
+      const matched = bySite?.site || matchSiteToken(siteToken, sites);
       return [
         {
           name: trimmed,

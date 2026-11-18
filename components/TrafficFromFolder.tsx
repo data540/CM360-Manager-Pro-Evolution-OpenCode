@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import { getGoogleClientId } from '../constants';
 import type { DetectedFile } from '../services/creativeDetection';
 import { downloadDriveSpreadsheet, getDriveFolder, getDriveToken, listDriveTree } from '../services/drive';
-import { CountryGroup, DriveFolderResult, groupDriveFiles, parseDriveFolderId } from '../services/driveFolders';
+import { advertiserFromFolderName, assignFolderAdvertiser, CountryGroup, DriveFolderResult, groupDriveFiles, parseDriveFolderId } from '../services/driveFolders';
 import { buildTrafficPlan, PlanAd, PlanPlacement, TrafficPlan } from '../services/trafficPlan';
 import { executePlan, ExecutionLog, StepStatus } from '../services/trafficExecutor';
 import { buildFullTrafficPlan, FullPlannedCreative, FullTrafficPlan, parsePlacementNames } from '../services/trafficPlanFull';
@@ -837,7 +837,7 @@ const CompleteExecutionPanel: React.FC<CompleteExecutionPanelProps> = ({ plan, c
 // ─── Main component ────────────────────────────────────────────────────────────
 
 const TrafficFromFolder: React.FC = () => {
-  const { accessToken, profileId, selectedCampaign } = useApp();
+  const { accessToken, profileId, selectedCampaign, advertisers } = useApp();
   const [link, setLink] = useState(readLastLink);
   const [folder, setFolder] = useState<{ name: string; result: DriveFolderResult } | null>(null);
   const [campaignsByAdvertiser, setCampaignsByAdvertiser] = useState<Record<string, CampaignOption[]>>({});
@@ -972,7 +972,10 @@ const TrafficFromFolder: React.FC = () => {
       const token = await getDriveToken(getGoogleClientId());
       setProgress('Leyendo la carpeta…');
       const root = await getDriveFolder(token, folderId);
-      const result = groupDriveFiles(root.name, await listDriveTree(token, folderId));
+      const grouped = groupDriveFiles(root.name, await listDriveTree(token, folderId));
+      // A root folder named after another advertiser ("Ocaso Seguros · …") goes to that advertiser.
+      const folderAdvertiser = advertiserFromFolderName(root.name, advertisers.map((a) => ({ id: String(a.id), name: a.name })));
+      const result = folderAdvertiser ? assignFolderAdvertiser(grouped, folderAdvertiser) : grouped;
       try { localStorage.setItem(LAST_LINK_KEY, link.trim()); } catch { /* ignore */ }
 
       // Tracking spreadsheets in the folder replace the ones read from a previous folder.
