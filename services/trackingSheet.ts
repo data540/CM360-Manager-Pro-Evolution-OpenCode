@@ -4,6 +4,7 @@
 // The xlsx is read with fflate (it is a zip of XML), so no spreadsheet dependency is needed.
 
 import { unzipSync, strFromU8 } from 'fflate';
+import { resolveCountry } from './countryResolver';
 
 export interface TrackingRule {
   /** Row number in the sheet (1-based), for messages. */
@@ -164,13 +165,10 @@ const HEADERS = {
 const FALLBACK = { support: 2, campaign: 3, banner: 5, format: 6, click: 13 };
 
 /** `BF_Nov26_CO_ES` → `CO`: the country is the token before the language. */
+/** Country of a campaign / banner name (see countryResolver: CO_ES, BEL_EN, SUI-EN, USA-EN…). */
 export const countryFromName = (name: string, knownCodes?: Set<string>): string | undefined => {
-  const tokens = (name || '').toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
-  const pair = (name || '').match(/(?:^|[_\-\s])([A-Za-z]{2})[_\-\s]([A-Za-z]{2})$/);
-  if (pair) return pair[1].toUpperCase();
-  const twoLetter = tokens.filter((t) => /^[A-Z]{2}$/.test(t));
-  const known = knownCodes ? twoLetter.filter((t) => knownCodes.has(t)) : twoLetter;
-  return known[0];
+  const code = resolveCountry(name);
+  return code && (!knownCodes || knownCodes.has(code)) ? code : undefined;
 };
 
 export const parseTrackingRows = (rows: string[][], knownCodes?: Set<string>): TrackingSheet => {
@@ -199,7 +197,7 @@ export const parseTrackingRows = (rows: string[][], knownCodes?: Set<string>): T
     const campaignName = cell('campaign');
     const bannerName = cell('banner');
     const country = countryFromName(campaignName, knownCodes) || countryFromName(bannerName, knownCodes);
-    if (!country) skipped.push({ row, reason: `Fila ${row} (${support}): no se reconoce el país en «${campaignName || bannerName}».` });
+    if (!country) skipped.push({ row, reason: `Fila ${row} (${support}): «${campaignName || bannerName}» no indica ningún país (como BEL_EN o CO_ES), así que su URL no se aplica a ninguna campaña.` });
     rules.push({ row, support, country, campaignName, bannerName, format: cell('format').toLowerCase(), clickUrl });
   });
   return { rules, skipped };
