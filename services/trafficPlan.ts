@@ -23,6 +23,8 @@ export interface PlanAd {
   name: string;
   isDefault: boolean;
   active: boolean;
+  /** Archived in CM360: never reused. Inactive but not archived Ads can be updated and switched on. */
+  archived?: boolean;
   placementIds: string[];
 }
 

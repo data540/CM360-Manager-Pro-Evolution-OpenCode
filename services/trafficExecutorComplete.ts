@@ -162,8 +162,8 @@ export const executeCompletePlan = async (
     setAd(i, { status: 'running' });
     try {
       if (action.kind === 'update') {
-        await updateAd(ctx, action.adId!, creativeIds, action.mode, action.clickUrl, scheduleFor(action));
-        setAd(i, { status: 'done', message: `${creativeIds.length} creatividad${creativeIds.length === 1 ? '' : 'es'} (${action.mode === 'replace' ? 'sustituyen' : 'añadidas'})${partial}` });
+        await updateAd(ctx, action.adId!, creativeIds, action.mode, action.clickUrl, scheduleFor(action), action.activate);
+        setAd(i, { status: 'done', message: `${action.activate ? 'Activado · ' : ''}${creativeIds.length} creatividad${creativeIds.length === 1 ? '' : 'es'} (${action.mode === 'replace' ? 'sustituyen' : 'añadidas'})${partial}` });
         continue;
       }
       // Re-check: a re-run, or CM360 itself after the campaign association, may have created it.

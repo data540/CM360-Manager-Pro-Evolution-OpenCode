@@ -58,11 +58,13 @@ export interface CompleteAdAction {
   placementIds: string[];
   fileIds: string[];
   mode: 'replace' | 'add';
+  /** The Ad was inactive (not archived): it is switched on when its creatives are updated. */
+  activate?: boolean;
   /** Click-through URL from the tracking file for the creatives of this run (not the ones already in rotation). */
   clickUrl?: string;
 }
 
-export type RowAction = 'update' | 'create' | 'none' | 'off';
+export type RowAction = 'update' | 'activate' | 'create' | 'none' | 'off';
 
 export interface CompleteRow {
   placement: PlanPlacement;
@@ -236,7 +238,7 @@ export const buildCompletePlan = (input: CompletePlanInput): CompletePlan => {
   const uncovered: PlanPlacement[] = [];
   const familiesInFolder = new Set(creatives.map((c) => (c.kind === 'video' ? 'video' : 'display')));
 
-  const addUpdate = (ad: PlanAd, placementId: string, fileIds: string[], isDefault: boolean, clickUrl?: string) => {
+  const addUpdate = (ad: PlanAd, placementId: string, fileIds: string[], isDefault: boolean, clickUrl?: string, activate = false) => {
     const existing = actionsByAd.get(ad.id);
     if (existing) {
       if (clickUrl && existing.clickUrl && existing.clickUrl !== clickUrl) {
@@ -262,6 +264,7 @@ export const buildCompletePlan = (input: CompletePlanInput): CompletePlan => {
       fileIds: [...fileIds],
       mode: isDefault ? options.defaultMode : options.standardMode,
       clickUrl: isDefault ? undefined : clickUrl,
+      ...(activate ? { activate: true } : {}),
     });
   };
 
@@ -284,19 +287,15 @@ export const buildCompletePlan = (input: CompletePlanInput): CompletePlan => {
       landing,
     };
 
-    const activeStandard = linked.filter((ad) => !ad.isDefault && ad.active);
-    if (activeStandard.length > 0) {
-      activeStandard.forEach((ad) => addUpdate(ad, placement.id, fileIds, false, landing?.url));
-      row.standard = { action: 'update', adNames: activeStandard.map((a) => a.name) };
+    // Existing standard Ads are reused: the active ones, or else the inactive (not archived) ones,
+    // which are switched on. A new Ad is created only when the placement has none to reuse.
+    const usableStandard = linked.filter((ad) => !ad.isDefault && !ad.archived);
+    const activeStandard = usableStandard.filter((ad) => ad.active);
+    const targets = activeStandard.length > 0 ? activeStandard : usableStandard;
+    if (targets.length > 0) {
+      targets.forEach((ad) => addUpdate(ad, placement.id, fileIds, false, landing?.url, !ad.active));
+      row.standard = { action: activeStandard.length > 0 ? 'update' : 'activate', adNames: targets.map((a) => a.name) };
     } else {
-      if (linked.some((ad) => !ad.isDefault)) {
-        issues.push({
-          severity: 'warning',
-          code: 'placement_without_ad',
-          message: `${placement.name} solo tiene Ads estándar inactivos: se crea uno nuevo.`,
-          placementId: placement.id,
-        });
-      }
       creates.push({
         key: `std:${placement.id}`,
         kind: 'create',

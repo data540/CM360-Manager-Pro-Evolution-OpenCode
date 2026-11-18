@@ -66,6 +66,7 @@ const toPlanAd = (ad: any): PlanAd => ({
   name: ad.name || `Ad_${ad.id}`,
   isDefault: ad.type === 'AD_SERVING_DEFAULT_AD',
   active: !!ad.active && !ad.archived,
+  archived: !!ad.archived,
   placementIds: (ad.placementAssignments || []).map((pa: any) => String(pa.placementId)).filter(Boolean),
 });
 
@@ -537,6 +538,7 @@ const FullExecutionPanel: React.FC<FullExecutionPanelProps> = ({ plan, campaignN
 const ROW_ACTION_LABEL: Record<RowAction, { label: string; tone: string }> = {
   update: { label: 'Actualizar', tone: 'text-sky-300' },
   create: { label: 'Crear', tone: 'text-emerald-300' },
+  activate: { label: 'Actualizar y activar', tone: 'text-violet-300' },
   none: { label: 'Sin Default', tone: 'text-amber-400' },
   off: { label: '—', tone: 'text-slate-600' },
 };
@@ -756,6 +758,11 @@ const CompleteExecutionPanel: React.FC<CompleteExecutionPanelProps> = ({ plan, c
             <ul className="text-sm text-slate-300 list-disc pl-5 space-y-1">
               {plan.creatives.length > 0 && <li>Subir <b>{plan.creatives.length}</b> creatividades y asociarlas a la campaña (las que ya existan con el mismo nombre se reutilizan).</li>}
               {n(false, 'create') > 0 && <li>Crear <b>{n(false, 'create')}</b> Ads estándar (uno por placement, con el nombre del placement).</li>}
+              {plan.actions.some((a) => a.activate) && (
+                <li>
+                  Activar <b>{plan.actions.filter((a) => a.activate).length}</b> Ads estándar que estaban inactivos (reciben las creatividades nuevas).
+                </li>
+              )}
               {n(false, 'update') > 0 && (
                 <li>Actualizar <b>{n(false, 'update')}</b> Ads estándar: las creatividades {options.standardMode === 'replace' ? 'sustituyen a las actuales' : 'se añaden en rotación'}.</li>
               )}

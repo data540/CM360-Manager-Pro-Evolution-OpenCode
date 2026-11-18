@@ -159,6 +159,8 @@ export const updateAd = async (
   mode: 'replace' | 'add',
   landing?: string,
   schedule?: CreativeSchedule,
+  /** Switch the Ad on (it was inactive and now gets creatives). */
+  activate?: boolean,
 ) => {
   const res = await cm(ctx, `ads/${adId}`);
   if (!res.ok) throw new Error(await apiError(res, 'No se pudo leer el anuncio'));
@@ -175,9 +177,10 @@ export const updateAd = async (
     newCreativesLanding: landing,
   });
   const scheduled = applyCreativeSchedule(assignments, schedule, ad.startTime, ad.endTime);
-  const body = ad.creativeRotation
+  const body: Record<string, unknown> = ad.creativeRotation
     ? { id: adId, creativeRotation: { ...ad.creativeRotation, creativeAssignments: scheduled } }
     : { id: adId, creativeAssignments: scheduled };
+  if (activate) body.active = true;
   const patch = await cm(ctx, `ads?id=${encodeURIComponent(adId)}`, { method: 'PATCH', body: JSON.stringify(body) });
   if (!patch.ok) throw new Error(await apiError(patch, 'Error al actualizar el anuncio'));
 

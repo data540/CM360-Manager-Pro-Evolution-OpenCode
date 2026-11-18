@@ -64,10 +64,18 @@ test('existing Ads are updated, only the missing ones are created', () => {
   assert.deepEqual(summary, ['update:std:a1:add', 'create:std:p2:add', 'update:def:d2:replace', 'create:def:p1:replace']);
 });
 
-test('inactive standard Ads do not count: a new one is created with a warning', () => {
-  const plan = buildCompletePlan(input({ files: [file('navidad_300x250.jpg')], placements: [P300], ads: [ad('a1', ['p1'], { active: false })] }));
-  assert.equal(plan.actions.find((a) => !a.isDefault)?.kind, 'create');
-  assert.ok(plan.issues.some((i) => i.code === 'placement_without_ad'));
+test('inactive standard Ads are reused and switched on; archived ones are not', () => {
+  const inactive = buildCompletePlan(input({ files: [file('navidad_300x250.jpg')], placements: [P300], ads: [ad('a1', ['p1'], { active: false })] }));
+  const std = inactive.actions.find((a) => !a.isDefault)!;
+  assert.deepEqual([std.kind, std.adId, std.activate, std.mode], ['update', 'a1', true, 'add']);
+  assert.equal(inactive.rows[0].standard.action, 'activate');
+
+  // An active Ad wins over an inactive one on the same placement (the inactive one is left alone).
+  const mixed = buildCompletePlan(input({ files: [file('navidad_300x250.jpg')], placements: [P300], ads: [ad('a1', ['p1'], { active: false }), ad('a2', ['p1'])] }));
+  assert.deepEqual(mixed.actions.filter((a) => !a.isDefault).map((a) => [a.adId, !!a.activate]), [['a2', false]]);
+
+  const archived = buildCompletePlan(input({ files: [file('navidad_300x250.jpg')], placements: [P300], ads: [ad('a1', ['p1'], { active: false, archived: true })] }));
+  assert.equal(archived.actions.find((a) => !a.isDefault)?.kind, 'create');
 });
 
 test('without "poner como Default" no Default Ad is touched; without "crear" only existing ones are', () => {
