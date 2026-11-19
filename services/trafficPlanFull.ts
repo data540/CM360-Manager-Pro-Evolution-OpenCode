@@ -55,7 +55,7 @@ const GENERIC_TOKENS = new Set([
   'dis', 'prs', 'rtg', 'nat', 'gen', 'desktop', 'mobile', 'tablet', 'ctv',
   'video', 'display', 'audio', 'connected', 'audience', 'extension', 'standard',
   // Brand day words (side of the page), never a site.
-  'brandday', 'izq', 'izda', 'izqda', 'izquierda', 'dch', 'dcha', 'drch', 'drcha', 'derecha',
+  'brandday', 'brandweek', 'izq', 'izda', 'izqda', 'izquierda', 'dch', 'dcha', 'drch', 'drcha', 'derecha',
 ]);
 
 export const extractSiteToken = (name: string): string => {

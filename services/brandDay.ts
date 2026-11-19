@@ -1,4 +1,5 @@
-// Brand day ("bd") placements come in pairs, one per side of the page (e.g. 456x1000 izq + dch).
+// Brand day ("bd") and brand week ("bw") placements come in pairs, one per side of the page
+// (e.g. 456x1000 izq + dch).
 // Both creatives share the same size, so the side written in the names is what pairs them.
 
 export type Side = 'left' | 'right';
@@ -21,8 +22,18 @@ const tokensOf = (name: string) =>
 /** Short words that can be something else in a name (site `der_standard`); placements need "bd" for them. */
 const WEAK = new Set(['der', 'dra', 'iz']);
 
-const isBrandDayTokens = (tokens: string[]) =>
-  tokens.some((t, i) => t === 'bd' || t === 'brandday' || (t === 'brand' && tokens[i + 1] === 'day'));
+export type BrandKind = 'day' | 'week';
+
+/** `bd` / `brandday` / `brand day` → day; `bw` / `brandweek` / `brand week` → week. */
+const brandKindOfTokens = (tokens: string[]): BrandKind | undefined => {
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t === 'bd' || t === 'brandday' || (t === 'brand' && tokens[i + 1] === 'day')) return 'day';
+    if (t === 'bw' || t === 'brandweek' || (t === 'brand' && tokens[i + 1] === 'week')) return 'week';
+  }
+  return undefined;
+};
+const isBrandDayTokens = (tokens: string[]) => !!brandKindOfTokens(tokens);
 
 /** Side named in a file name, matched as whole words only. */
 export const sideOf = (name: string, { strict = false } = {}): Side | undefined => {
@@ -35,10 +46,14 @@ export const sideOf = (name: string, { strict = false } = {}): Side | undefined 
   return left ? 'left' : 'right';
 };
 
-/** Side of a placement: short words like `der` only count in brand day ("bd") placements. */
+/** Side of a placement: short words like `der` only count in brand day / week ("bd" / "bw") placements. */
 export const placementSideOf = (name: string) => sideOf(name, { strict: true });
 
+export const brandKindOf = (name: string) => brandKindOfTokens(tokensOf(name));
+/** Brand day or brand week. */
 export const isBrandDay = (name: string) => isBrandDayTokens(tokensOf(name));
+export const brandKindLabel = (kind: BrandKind | undefined) => (kind === 'week' ? 'brand week' : 'brand day');
+export const brandKindShort = (kind: BrandKind | undefined) => (kind === 'week' ? 'BW' : 'BD');
 
 /** Same side, or neither has one. A sided creative never goes to an unsided placement, nor the reverse. */
 export const sidesMatch = (fileName: string, placementName: string) => sideOf(fileName) === placementSideOf(placementName);
@@ -73,7 +88,7 @@ export const brandDayNotes = (placements: NotePlacement[], files: NoteFile[]) =>
     const side = placementSideOf(p.name);
     if (!side) {
       if (isBrandDay(p.name)) {
-        notes.push({ placementId: p.id, message: `${p.name} es un brand day pero el nombre no dice el lado (izq / dch): solo recibirá creatividades sin lado.` });
+        notes.push({ placementId: p.id, message: `${p.name} es un ${brandKindLabel(brandKindOf(p.name))} pero el nombre no dice el lado (izq / dch): solo recibirá creatividades sin lado.` });
       }
       return;
     }
@@ -85,7 +100,8 @@ export const brandDayNotes = (placements: NotePlacement[], files: NoteFile[]) =>
       : sameSize.length
         ? ` Hay creatividades de ${p.size}, pero ${sameSize.join(' / ')}.`
         : '';
-    notes.push({ placementId: p.id, message: `Brand day ${sideText(side)} ${p.name}: no hay creatividad ${sideText(side)} de ${p.size}.${what}` });
+    const kind = brandKindLabel(brandKindOf(p.name));
+    notes.push({ placementId: p.id, message: `${kind[0].toUpperCase()}${kind.slice(1)} ${sideText(side)} ${p.name}: no hay creatividad ${sideText(side)} de ${p.size}.${what}` });
   });
   return notes;
 };

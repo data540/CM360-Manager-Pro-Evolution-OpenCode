@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { brandDayNotes, isBrandDay, placementSideOf, sideOf, sidesMatch, stripSide } from './brandDay';
+import { brandDayNotes, brandKindOf, isBrandDay, placementSideOf, sideOf, sidesMatch, stripSide } from './brandDay';
 import { deviceFromFileName, sizeFromFileName, type DetectedFile } from './creativeDetection';
 import { buildTrafficPlan, type PlanPlacement } from './trafficPlan';
 import { buildCompletePlan, creativeSetKey } from './trafficPlanComplete';
@@ -37,6 +37,16 @@ test('short side words count in placements only when they are brand days', () =>
   assert.equal(placementSideOf('ae-at_kpi360_x_dis_bd_der_standard_desktop_gen_der_456x1000'), 'right');
   assert.equal(placementSideOf('ae-es_kpi360_x_dis_prs_elpais_desktop_gen_dch_456x1000'), 'right');
   assert.ok(isBrandDay('x_bd_elpais') && isBrandDay('x_brand_day') && !isBrandDay('x_bdx_elpais'));
+});
+
+test('brand week ("bw") works like brand day', () => {
+  assert.deepEqual(['x_bw_elpais', 'x_brandweek', 'x_brand_week', 'x_bd_elpais', 'x_brand-day', 'x_bwx'].map(brandKindOf),
+    ['week', 'week', 'week', 'day', 'day', undefined]);
+  assert.equal(placementSideOf('ae-at_kpi360_x_dis_bw_der_standard_desktop_gen_der_456x1000'), 'right');
+  assert.ok(sidesMatch('ocaso_bw_dch_456x1000.jpg', 'oc-es_kpi360_hogar_2026_dis_bw_elpais_desktop_gen_dch_456x1000'));
+  const notes = brandDayNotes([{ id: 'p1', name: 'oc-es_kpi360_x_dis_bw_elpais_desktop_gen_izq_456x1000', size: '456x1000' }], []);
+  assert.match(notes[0].message, /^Brand week izquierda /);
+  assert.match(brandDayNotes([{ id: 'p2', name: 'oc-es_kpi360_x_dis_bw_elpais_456x1000', size: '456x1000' }], [])[0].message, /es un brand week/);
 });
 
 test('sides must agree: a sided creative never goes to a plain placement, nor the reverse', () => {
