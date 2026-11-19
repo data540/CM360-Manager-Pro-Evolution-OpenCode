@@ -14,6 +14,7 @@ import { formatDateToken } from '../services/trafficPlan';
 import { CompleteExecutionLog, executeCompletePlan, initialCompleteLog } from '../services/trafficExecutorComplete';
 import { mergeTrackingFiles, readTrackingBytes, readTrackingFile, TrackingFile, withSource } from '../services/trackingSheet';
 import { MARKETS } from '../services/markets';
+import { isAppOutdated, OUTDATED_MESSAGE } from '../services/appVersion';
 import { brandKindOf, brandKindShort, placementSideOf, sideLabel, sideOf, type Side } from '../services/brandDay';
 import CampaignPicker from './CampaignPicker';
 
@@ -1167,6 +1168,7 @@ const TrafficFromFolder: React.FC = () => {
     const advertiserId = group.market?.advertiserId;
     if (!group.market || !advertiserId || !campaignId || !accessToken || !profileId) return;
     setCompleteConfirmKey(null);
+    if (await isAppOutdated()) { setGroupState(key, { error: OUTDATED_MESSAGE }); return; }
     setCompleteExecLogs((prev) => ({ ...prev, [key]: initialCompleteLog(plan) }));
     try {
       const driveToken = await getDriveToken(getGoogleClientId());
@@ -1193,6 +1195,7 @@ const TrafficFromFolder: React.FC = () => {
     const campaignId = groupStates[key]?.campaignId;
     if (!group.market || !campaignId || !accessToken || !profileId) return;
     setConfirmKey(null);
+    if (await isAppOutdated()) { setGroupState(key, { error: OUTDATED_MESSAGE }); return; }
     try {
       const driveToken = await getDriveToken(getGoogleClientId());
       await executePlan(
@@ -1211,6 +1214,7 @@ const TrafficFromFolder: React.FC = () => {
     const advertiserId = group.market?.advertiserId;
     if (!advertiserId || !campaignId || !accessToken || !profileId) return;
     setFullConfirmKey(null);
+    if (await isAppOutdated()) { setGroupState(key, { error: OUTDATED_MESSAGE }); return; }
 
     const campaignEndDate = campaignsByAdvertiser[advertiserId]?.find((c) => c.id === campaignId)?.endDate;
 

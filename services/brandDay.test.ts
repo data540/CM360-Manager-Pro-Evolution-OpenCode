@@ -123,3 +123,30 @@ test('full plan: halves matched by side, named with it, one Default Ad each', ()
   ]);
   assert.deepEqual(plan.defaultAds.map((d) => [d.placementIndex, d.creativeIndex]), [[0, 0], [1, 1]]);
 });
+
+test('real case (Godo · La Vanguardia): each half only in the Ads of its own placement', () => {
+  const IZQ = placement('461883266', 'ae-es_godo_bf_2026_dis_bd-home_directo_all_lavanguardia-izq_456x1000_461883266', '456x1000');
+  const DCH = placement('462140232', 'ae-es_godo_bf_2026_dis_bd-home_directo_all_lavanguardia-dch_456x1000_462140232', '456x1000');
+  const ad = (id: string, name: string, placementId: string, isDefault: boolean) => ({ id, name, isDefault, active: true, placementIds: [placementId] });
+  for (const prefix of ['', 'test']) {
+    const plan = buildCompletePlan({
+      campaign: { id: 'c1', name: 'ae-es_godo_bf_dis' },
+      files: [file('ae-es_bf_BD-456x1000-izq.jpg'), file('ae-es_bf_BD-456x1000-der.jpg')],
+      placements: [IZQ, DCH],
+      ads: [
+        ad('sI', IZQ.name, IZQ.id, false), ad('dI', '456x1000 Default Web Ad', IZQ.id, true),
+        ad('sD', DCH.name, DCH.id, false), ad('dD', '456x1000 Default Web Ad', DCH.id, true),
+      ],
+      sites: [{ id: 's1', name: 'La Vanguardia' }],
+      options: {
+        prefix, suffix: '', includeDate: true, uploadDate: new Date(2026, 10, 19),
+        setAsDefault: true, createMissingDefaultAds: true, defaultMode: 'replace', standardMode: 'add',
+      },
+    });
+    const byAd = Object.fromEntries(plan.actions.map((a) => [a.adId, a.fileIds]));
+    assert.deepEqual(byAd, {
+      sI: ['ae-es_bf_BD-456x1000-izq.jpg'], dI: ['ae-es_bf_BD-456x1000-izq.jpg'],
+      sD: ['ae-es_bf_BD-456x1000-der.jpg'], dD: ['ae-es_bf_BD-456x1000-der.jpg'],
+    });
+  }
+});
