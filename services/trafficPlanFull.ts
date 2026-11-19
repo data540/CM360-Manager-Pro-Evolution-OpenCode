@@ -4,6 +4,7 @@
 
 import type { DetectedFile, CreativeKind } from './creativeDetection';
 import { buildCreativeName } from './trafficPlan';
+import { sidesMatch, sizeWithSide } from './brandDay';
 
 export interface ParsedPlacement {
   name: string;
@@ -53,6 +54,8 @@ export interface FullPlanOptions {
 const GENERIC_TOKENS = new Set([
   'dis', 'prs', 'rtg', 'nat', 'gen', 'desktop', 'mobile', 'tablet', 'ctv',
   'video', 'display', 'audio', 'connected', 'audience', 'extension', 'standard',
+  // Brand day words (side of the page), never a site.
+  'brandday', 'izq', 'izda', 'izqda', 'izquierda', 'dch', 'dcha', 'drch', 'drcha', 'derecha',
 ]);
 
 export const extractSiteToken = (name: string): string => {
@@ -105,7 +108,8 @@ export const parsePlacementNames = (text: string, sites: CmSite[]): ParsedPlacem
       const trimmed = name.replace(/_+$/, '');
       // The site is the word of the name that is a CM360 site (dv360, seedtag…); the concept
       // words before it (black-friday, decesos…) must not be taken for it.
-      const words = trimmed.toLowerCase().split(/[_-]+/).filter(Boolean);
+      // `kpi360` is the agency token of every name, never the site (even if a "KPI360 Direct" site exists).
+      const words = trimmed.toLowerCase().split(/[_-]+/).filter((w) => w && !/^kpi\d+$/.test(w));
       const bySite = words
         .map((w) => ({
           w,
@@ -142,7 +146,7 @@ export const buildFullTrafficPlan = (
   for (const file of driveFiles.filter((f) => f.kind !== 'unsupported' && f.size)) {
     const matchingIndices = parsedPlacements
       .map((p, i) => ({ p, i }))
-      .filter(({ p }) => p.size === file.size)
+      .filter(({ p }) => p.size === file.size && sidesMatch(file.fileName, p.name))
       .map(({ i }) => i);
 
     if (matchingIndices.length === 0) {
@@ -150,7 +154,7 @@ export const buildFullTrafficPlan = (
       continue;
     }
 
-    const baseName = buildCreativeName(options.campaignName, file.size, options.uploadDate);
+    const baseName = buildCreativeName(options.campaignName, sizeWithSide(file.size, file.fileName), options.uploadDate);
     const count = (usedNames.get(baseName) || 0) + 1;
     usedNames.set(baseName, count);
     const creativeName = count === 1 ? baseName : `${baseName}_${count}`;
@@ -168,7 +172,7 @@ export const buildFullTrafficPlan = (
   if (options.createDefaultAds) {
     parsedPlacements.forEach((p, pi) => {
       if (options.siteFilter.size > 0 && !options.siteFilter.has(p.siteToken)) return;
-      const ci = creatives.findIndex((c) => c.size === p.size);
+      const ci = creatives.findIndex((c) => c.placementIndices.includes(pi));
       if (ci === -1) return;
       defaultAds.push({ placementIndex: pi, adName: `${p.size} Default Web Ad`, creativeIndex: ci });
     });

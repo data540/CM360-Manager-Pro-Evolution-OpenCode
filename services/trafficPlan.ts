@@ -4,6 +4,7 @@
 
 import type { CreativeKind, DetectedFile } from './creativeDetection';
 import { marketOfCampaign, type Market } from './markets';
+import { brandDayNotes, sidesMatch, sizeWithSide } from './brandDay';
 
 export interface PlanPlacement {
   id: string;
@@ -66,7 +67,8 @@ export type PlanIssueCode =
   | 'placement_without_ad'
   | 'mixed_size_ad'
   | 'tracking_support_mismatch'
-  | 'creative_dates';
+  | 'creative_dates'
+  | 'brand_day';
 
 export interface PlanIssue {
   severity: 'error' | 'warning';
@@ -131,7 +133,9 @@ export const matchesFile = (file: DetectedFile, placement: PlanPlacement) => {
   // meaningful size in CM360, so any active video placement of the campaign is a candidate.
   if (file.kind !== 'video' && placement.size !== file.size) return false;
   const placementDevice = deviceOfName(placement.name);
-  return !(file.device && placementDevice && file.device !== placementDevice);
+  if (file.device && placementDevice && file.device !== placementDevice) return false;
+  // Brand day halves share a size: the side (izq / dch) in both names decides.
+  return sidesMatch(file.fileName, placement.name);
 };
 
 export const buildTrafficPlan = (input: TrafficPlanInput): TrafficPlan => {
@@ -178,7 +182,7 @@ export const buildTrafficPlan = (input: TrafficPlanInput): TrafficPlan => {
       return;
     }
 
-    const baseName = buildCreativeName(campaign.name, file.size, options.uploadDate);
+    const baseName = buildCreativeName(campaign.name, sizeWithSide(file.size, file.fileName), options.uploadDate);
     const count = (usedNames.get(baseName) || 0) + 1;
     usedNames.set(baseName, count);
     const creativeName = count === 1 ? baseName : `${baseName}_${count}`;
@@ -243,6 +247,10 @@ export const buildTrafficPlan = (input: TrafficPlanInput): TrafficPlan => {
         placementId: placement.id,
       });
     }
+  });
+
+  brandDayNotes(placements.filter((p) => familiesInFolder.has(placementFamily(p))), files).forEach(({ placementId, message }) => {
+    issues.push({ severity: 'warning', code: 'brand_day', message, placementId });
   });
 
   const sortedIssues = issues.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'error' ? -1 : 1));

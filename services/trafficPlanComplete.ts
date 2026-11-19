@@ -6,6 +6,7 @@
 import type { DetectedFile } from './creativeDetection';
 import { marketOfCampaign, type Market } from './markets';
 import { describeRule, findTrackingRule, placementMatchesSupport, ruleKey, similarSupportName, type TrackingRule } from './trackingSheet';
+import { brandDayNotes, sideOf, stripSide } from './brandDay';
 import { formatDateToken, matchesFile, placementFamily, type PlanAd, type PlanIssue, type PlanPlacement } from './trafficPlan';
 
 export interface CompleteOptions {
@@ -118,8 +119,7 @@ export const buildPrefixedCreativeName = (fileName: string, prefix: string, suff
 
 /** Files sharing a name once the size token is removed belong to the same "juego". */
 export const creativeSetKey = (fileName: string) => {
-  const base = fileName
-    .replace(/\.[^./\\]+$/, '')
+  const base = stripSide(fileName.replace(/\.[^./\\]+$/, ''))
     .replace(/\d+\s*[x×]\s*\d+/gi, '')
     .replace(/[\s_.-]{2,}/g, '_')
     .replace(/^[\s_.-]+|[\s_.-]+$/g, '');
@@ -222,7 +222,9 @@ export const buildCompletePlan = (input: CompletePlanInput): CompletePlan => {
     .map(([key, sizes]) => ({ key, sizes }))
     .sort((a, b) => b.sizes.length - a.sizes.length || a.key.localeCompare(b.key));
   const filesBySize = new Map<string, CompleteCreative[]>();
-  creatives.forEach((c) => filesBySize.set(c.size, [...(filesBySize.get(c.size) || []), c]));
+  // Both halves of a brand day share a size but are not alternatives: group by size and side.
+  const sizeSideKey = (c: CompleteCreative) => `${c.size}|${sideOf(c.fileName) || ''}`;
+  creatives.forEach((c) => filesBySize.set(sizeSideKey(c), [...(filesBySize.get(sizeSideKey(c)) || []), c]));
   const needsSetChoice = [...filesBySize.values()].some((list) => list.length > 1);
   const chosenSet = options.defaultSetKey && setSizes.has(options.defaultSetKey) ? options.defaultSetKey : sets[0]?.key;
   const defaultFileIdsFor = (fileIds: string[]) => {
@@ -336,6 +338,9 @@ export const buildCompletePlan = (input: CompletePlanInput): CompletePlan => {
 
   // Supports of this country in the tracking file. The support must be named exactly as in CM360
   // (placement name token or site name): otherwise it is an error, with the closest name as a hint.
+  brandDayNotes(candidatePlacements.filter((p) => familiesInFolder.has(placementFamily(p) as 'video' | 'display')), files)
+    .forEach(({ placementId, message }) => issues.push({ severity: 'warning', code: 'brand_day', message, placementId }));
+
   const matchedRows = new Set(rows.map((r) => r.landing?.key).filter(Boolean));
   const campaignNames = placements.map((p) => ({ name: p.name, siteName: siteName.get(p.siteId) }));
   countryRules.forEach((rule) => {

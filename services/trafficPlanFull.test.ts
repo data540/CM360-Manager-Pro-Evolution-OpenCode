@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractSizeFromName, parsePlacementNames } from './trafficPlanFull';
 
-const SITES = [{ id: '1', name: 'DV360' }, { id: '2', name: 'Quantcast' }, { id: '3', name: 'Seedtag' }, { id: '4', name: 'El País' }];
+const SITES = [{ id: '9', name: 'KPI360 Direct' }, { id: '1', name: 'DV360' }, { id: '2', name: 'Quantcast' }, { id: '3', name: 'Seedtag' }, { id: '4', name: 'El País' }];
 
 test('size is read from names that use underscores', () => {
   assert.equal(extractSizeFromName('ae-es_kpi360_black-friday_2026_dis_prs_dv360_desktop_gen_728x90'), '728x90');

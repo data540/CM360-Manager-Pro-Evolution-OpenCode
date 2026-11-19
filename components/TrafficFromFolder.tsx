@@ -14,7 +14,16 @@ import { formatDateToken } from '../services/trafficPlan';
 import { CompleteExecutionLog, executeCompletePlan, initialCompleteLog } from '../services/trafficExecutorComplete';
 import { mergeTrackingFiles, readTrackingBytes, readTrackingFile, TrackingFile, withSource } from '../services/trackingSheet';
 import { MARKETS } from '../services/markets';
+import { placementSideOf, sideLabel, sideOf, type Side } from '../services/brandDay';
 import CampaignPicker from './CampaignPicker';
+
+/** Side of a brand day half (izq / dch) next to a file or placement name. */
+const SideBadge: React.FC<{ side?: Side }> = ({ side }) =>
+  side ? (
+    <span className="ml-2 inline-block rounded bg-fuchsia-500/15 px-1.5 py-0.5 align-middle font-sans text-[10px] font-bold uppercase tracking-wider text-fuchsia-300">
+      BD · {sideLabel(side)}
+    </span>
+  ) : null;
 
 const LAST_LINK_KEY = 'traffic_folder_last_link';
 
@@ -91,7 +100,7 @@ const FileTable: React.FC<{ files: DetectedFile[] }> = ({ files }) => (
         .sort((a, b) => (a.size || '').localeCompare(b.size || '', undefined, { numeric: true }))
         .map((file) => (
           <tr key={file.id} className="border-t border-slate-800">
-            <td className="px-4 py-2 font-mono text-slate-200" title={file.relativePath}>{file.fileName}</td>
+            <td className="px-4 py-2 font-mono text-slate-200" title={file.relativePath}>{file.fileName}<SideBadge side={sideOf(file.fileName)} /></td>
             <td className="px-4 py-2 text-slate-400">{KIND_LABEL[file.kind]}</td>
             <td className="px-4 py-2 font-mono text-slate-300">
               {file.size || '—'}
@@ -178,7 +187,7 @@ const PlanView: React.FC<{ plan: TrafficPlan; files: DetectedFile[] }> = ({ plan
               <tr key={f.id} className="border-t border-slate-800 bg-sky-500/5 text-sky-200/60">
                 <td className="px-3 py-2 font-mono">{f.fileName}</td>
                 <td className="px-3 py-2 italic text-xs" colSpan={3}>
-                  {f.kind === 'unsupported' ? 'Tipo de archivo no admitido' : f.size ? `No hay placements activos de ${f.size}` : 'Sin tamaño detectado'}
+                  {f.kind === 'unsupported' ? 'Tipo de archivo no admitido' : f.size ? `No hay placements activos de ${f.size}${sideOf(f.fileName) ? ` (brand day ${sideLabel(sideOf(f.fileName)).toLowerCase()})` : ''}` : 'Sin tamaño detectado'}
                 </td>
               </tr>
             ))}
@@ -211,7 +220,7 @@ const PlanView: React.FC<{ plan: TrafficPlan; files: DetectedFile[] }> = ({ plan
 
 const FullPlanView: React.FC<{ plan: FullTrafficPlan }> = ({ plan }) => {
   const unknownSites = plan.placements.filter((p) => p.siteUnknown);
-  const creativeBySize = new Map<string, FullPlannedCreative>(plan.creatives.map((c) => [c.size, c]));
+  
 
   return (
     <div className="border-t border-slate-800 p-4 space-y-4">
@@ -253,11 +262,11 @@ const FullPlanView: React.FC<{ plan: FullTrafficPlan }> = ({ plan }) => {
         </thead>
         <tbody>
           {plan.placements.map((p, i) => {
-            const creative = creativeBySize.get(p.size);
+            const creative = plan.creatives.find((c) => c.placementIndices.includes(i));
             const hasDefaultAd = plan.defaultAds.some((d) => d.placementIndex === i);
             return (
               <tr key={i} className="border-t border-slate-800">
-                <td className="px-3 py-2 font-mono text-slate-200 break-all text-xs">{p.name}</td>
+                <td className="px-3 py-2 font-mono text-slate-200 break-all text-xs">{p.name}<SideBadge side={placementSideOf(p.name)} /></td>
                 <td className="px-3 py-2 font-mono text-slate-300">{p.size}</td>
                 <td className="px-3 py-2 text-xs">
                   {p.siteUnknown
@@ -670,7 +679,7 @@ const CompletePlanView: React.FC<CompletePlanViewProps> = ({ plan, files, campai
           <tbody>
             {plan.rows.map((row) => (
               <tr key={row.placement.id} className="border-t border-slate-800">
-                <td className="px-3 py-2 font-mono text-slate-200 break-all text-xs">{row.placement.name}</td>
+                <td className="px-3 py-2 font-mono text-slate-200 break-all text-xs">{row.placement.name}<SideBadge side={placementSideOf(row.placement.name)} /></td>
                 <td className="px-3 py-2 text-xs text-slate-400">{row.siteName || row.placement.siteId}</td>
                 <td className="px-3 py-2 font-mono text-xs text-slate-400" title={row.fileIds.map((id) => fileName.get(id)).join('\n')}>
                   {row.fileIds.length === 0 ? '—' : row.fileIds.length === 1 ? creativeByFile.get(row.fileIds[0])?.fileName : `${row.fileIds.length} archivos`}
